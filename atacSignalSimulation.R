@@ -296,12 +296,11 @@ sampleSwitch <- function(total, size){
   
   # Calculate the number of fragments to sample per peak
   fragsInPeaks[,fc:=2^abs(logFC)]
-  fragsInPeaks[, nFrags:=round(data.table::first(fc)*effectStrength), by=c("id")]
+  fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)*effectStrength), by=c("id")]
   
   # Only sample from positive logFcs run for multiple samples
   if(nrow(fragsInPeaks[logFC<0,])>0)
   {
-    fragsInPeaks[,fc:=2^abs(logFC)]
     fragsInPeaksSub <- fragsInPeaks[logFC<0,][,.SD[sampleSwitch(.N, data.table::first(nFrags))], by=id]
   }
   else
@@ -462,6 +461,7 @@ simAtacData <- function(bamPaths,
   # estimate logFCs
   peakDt <- .estLfc(enrichment, lfcDist)
   logFCs <- peakDt$lfc
+  print(length(unique(logFCs)))
   
   # Positive samples
   posSamples <- bamPaths[which(design==1)]
@@ -509,7 +509,7 @@ simAtacData <- function(bamPaths,
                               bedPath=bedPath, 
                               biasFileDir=negGcBiases[i],
                               sampleName=negSampleNames[i],
-                              logFCs=logFCs*-1,
+                              logFCs=logFCs,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup2$fracSub[1],
