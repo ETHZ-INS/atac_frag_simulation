@@ -1,0 +1,178 @@
+---
+title: "test_simulations"
+output: html_document
+date: '2023-02-21'
+---
+
+```{r setup, include=FALSE}
+library(Repitools)
+library(data.table)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(GenomicRanges)
+library(ggplot2)
+
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+
+source("../atacSignalSimulation.R")
+```
+
+The simulations scripts can be found under: /mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations. 
+Here everyhting is shown just for chromosome 1.
+
+# Load the necessary data
+
+## 1. Bias files
+
+```{r, load bias files}
+biasFileDirWeak <- paste("/mnt/plger/fgerbaldo/BenchmarkTFactivity/Benchmark_data/GATA2/ATAC/mm39GCBias", "SRR11113139.bam.txt", sep="/")
+biasFileDirMedium <- paste("/mnt/plger/fgerbaldo/BenchmarkTFactivity/Benchmark_data/MYC/GCBias", "SRR13444198.bam.txt", sep="/") 
+biasFileDirStrong <- paste("/mnt/plger/fgerbaldo/BenchmarkTFactivity/Benchmark_data/Evaluation_of_ATAC_protocols/GCBias", "SRR14515925.bam.txt", sep="/")
+```
+
+## 2. Peak coordinates & Enrichment over the input
+
+These can be downloaded on encode for a TF of interest. The relative enrichment over the input is typicall saved in the 7th column. Here an example for CTCF below:
+```{r, load peaks}
+# Peaks
+bedDir <- "ENCFF723DCX_ctcf.bed"
+peakTable <- fread("ENCFF723DCX_ctcf.bed", 
+                   col.names=c("chr", "start", "end", "rel_enr"),
+                   select=c(1:3,7))
+
+enrichment <- makeGRangesFromDataFrame(as.data.frame(peakTable), 
+                                       keep.extra.columns=TRUE)
+```
+
+## 3. Load the logFC vs Enrichment distributions
+
+Here the distribution of the logFC & enrichments in the haploinsufficiency experiment are loaded.
+```{r, logFC dist}
+lfcs <- readRDS("log_fcs_yy1.rds")
+enr <- readRDS("rel_enr_yy1.rds")
+
+lfcDistDt <- data.table(rel_enr=enr,
+                        lfc=lfcs)
+lfcDistDt[,rel_enr:=scale(rel_enr, center=TRUE, scale=TRUE)]
+
+ggplot(lfcDistDt, aes(x=rel_enr,y=lfc))+
+  geom_density2d_filled()+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("Observed")+
+  xlab("Relative Enrichment")+
+  ylab("Log FCs")+
+  xlim(c(-2.5,2.5))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+## 4. Setup the design of the ATAC experiments
+
+See correlation plot sent in common channel:
+```{r, exp design}
+# GC-Bias
+# group 1:  + + - 
+# group 2: - + - 
+
+gcBiases <- c(biasFileDirStrong,biasFileDirStrong, biasFileDirWeak,
+              biasFileDirWeak, biasFileDirStrong, biasFileDirWeak)
+
+bamDirs <- c("SRR19572817.bam",
+             "SRR16579104.bam",
+             "SRR19572933.bam",
+             "SRR19572816.bam",
+             "SRR19572818.bam",
+             "SRR16579105.bam")
+bamDirs <- paste0("/mnt/plger/datasets/A549_ATAC/aligned/", bamDirs)
+
+sampleNames <- c("sample1", "sample2", "sample3",
+                 "sample4", "sample5", "sample6")
+
+design <- c(1,1,1,-1,-1,-1)
+```
+
+## 5. Load the regions of interest
+
+```{r, load the genome and coords}
+#which <- GRanges(Rle(1:22), IRanges(start=rep(1,22), width=536870912))
+which <- GRanges(Rle(1), IRanges(start=1, width=536870912))
+genome <- BSgenome.Hsapiens.UCSC.hg38
+```
+
+# Simulate 
+
+## Set the params by group 
+```{r params group}
+paramsGroup1 <- data.table(biasFileDirs=biasFileDirWeak,
+                           fracSub=1.0, # fraction of fragments to be considered for GC and FL sampling
+                           prob_nf=0.7,
+                           prob_mono=0.9,
+                           prob_di=0.07,
+                           prob_tri=0.03)
+
+paramsGroup2 <- paramsGroup1
+
+# Vary fragment type probabilities
+paramsGroup2$prob_mono=0.8
+paramsGroup2$prob_di=0.15
+paramsGroup2$prob_tri=0.05
+
+paramsGroup1$name <- "group1"
+paramsGroup2$name <- "group2"
+```
+
+Simulate 6 samples with varying GC-Bias & varying effect strength. 
+
+Could be parallelized across the effect strengths for example.
+```{r simulated samples}
+# test different effect strengths
+for(es in c(0.5,1,2,3))
+{
+  ptm <- proc.time()
+  simFrags <- simAtacData(bamDirs, # ATAC .bam dirs (same order as design and sample names)
+                          bedDir, # bed file with the ChIP-peaks
+                          sampleNames, # names of the atac samples (arbitrary)
+                          gcBiases, # directory of the gc bias files
+                          design=design, # design, i.e. 1, -1 => to which group the bam file belongs
+                          effectStrength=es, # effect strength
+                          paramsGroup1, # parameters (e.g. FLD probabilities) of group 1
+                          paramsGroup2, # "" group2
+                          enrichment, #
+                          lfcDistDt, #
+                          which=which, # which chromosomes to simulate
+                          genome=BSgenome.Hsapiens.UCSC.hg38 # genome used
+                          )
+  print(proc.time()-ptm)
+
+  outDir <- "./sim_data_demo"
+  if(!dir.exists(outDir)) dir.create(outDir)
+  saveRDS(simFrags, file.path(outDir, paste0(paste("sim_ctcf", "lfc_based", "effect", es,  sep="_"), ".rds")))
+  #simFrags <- readRDS(file.path(outDir, paste0(paste("sim_ctcf", "effect", es,  sep="_"), ".rds")))
+  
+  # bed file format: chrom, start, end, name
+  bedSim <- simFrags[,c("seqnames", "start", "end", "sample", "gc_content", "strand"), with=FALSE]
+  bedSim$strand <- "."
+  bedSimMerged <- copy(bedSim)
+  bedSimMerged$sample <- "merged"
+  colnames(bedSimMerged) <- c("chrom", "chromStart", "chromEnd", "name", "score", "strand")
+
+  # save merged bed file
+  setorder(bedSimMerged, chrom, chromStart, chromEnd)
+  filePath <- file.path(outDir, paste0(paste("mergedSamples", "lfc_based", es, sep="_"), ".bed"))
+  write.table(bedSimMerged[,c("chrom", "chromStart", "chromEnd"), with=FALSE], filePath, 
+              quote=FALSE, col.names=FALSE,
+              sep="\t", 
+             row.names=FALSE)
+
+  # save .bed file by sample
+  bedSim <- split(bedSim, by="sample")
+  lapply(names(bedSim),function(sample){
+    setorder(bedSim[[sample]], seqnames, start, end)
+    filePath <- file.path(outDir, paste0(paste(sample, "lfc_based", es, sep="_"), ".bed"))
+    write.table(bedSim[[sample]][,c("seqnames", "start", "end"), with=FALSE], filePath, 
+                quote=FALSE, col.names=FALSE,
+                sep="\t", 
+                row.names=FALSE)})
+}
+```
