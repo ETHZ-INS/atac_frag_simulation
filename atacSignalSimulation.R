@@ -84,8 +84,8 @@ sampleSwitch <- function(total, size){
   lfcDistDt[,bin:=findInterval(get(enrCol), bins)]
   lfcDistDt[,bin_start:=bins[bin]]
   lfcDistDt[,bin_end:=bins[bin+1]]
-  lfcDistDt[is.na(bin_end),]$bin_end <- 100
-  lfcDistDt[bin_start==min(bin_start),]$bin_start <- -100
+  lfcDistDt[is.na(bin_end),]$bin_end <- 500
+  lfcDistDt[bin_start==min(bin_start),]$bin_start <- -500
   
   # sample values from respective bins
   # overlap by which bin contains 
@@ -296,7 +296,14 @@ sampleSwitch <- function(total, size){
   
   # Calculate the number of fragments to sample per peak
   fragsInPeaks[,fc:=2^abs(logFC)]
-  fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)*effectStrength), by=c("id")]
+  if(effectStrength>0)
+  {
+    fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)*effectStrength), by=c("id")]
+  }
+  else
+  {
+    fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)), by=c("id")]
+  }
   
   # Only sample from positive logFcs run for multiple samples
   if(nrow(fragsInPeaks[logFC<0,])>0)
@@ -461,7 +468,7 @@ simAtacData <- function(bamPaths,
   # estimate logFCs
   peakDt <- .estLfc(enrichment, lfcDist)
   logFCs <- peakDt$lfc
-  print(length(unique(logFCs)))
+  print(table(logFCs<0))
   
   # Positive samples
   posSamples <- bamPaths[which(design==1)]
@@ -541,5 +548,5 @@ simAtacData <- function(bamPaths,
   minDepth <- min(simSamples[,.N,by=sample]$N)
   simSamples <- simSamples[,.SD[sample(.N, minDepth)],by = sample]
   
-  return(simSamples)
+  return(list(sim=simSamples, lfc=logFCs))
 }
