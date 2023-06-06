@@ -16,7 +16,7 @@ Haven't checked yet but see:
 es stands for effect size
 ```{bash engine.opts='-l', eval=TRUE}
 mkdir -p ./sim_data/peaks
-for es in 0.5 , 1 , 2 , 3
+for es in 0, 0.5 , 1 , 2 , 3
 do
   macs2 callpeak --outdir ./sim_data_demo -f BED -t ./sim_data_demo/"mergedSamples_lfc_based_${es}.bed" --outdir ./sim_data_demo/peaks -n "mergedSamples_peaks_${es}" --nomodel --extsize 200
 done
@@ -26,7 +26,7 @@ done
 
 ```{bash engine.opts='-l', eval=TRUE}
 #mkdir -p ./sim_data/peaks
-for es in 0.5 , 1 , 2 , 3
+for es in 0, 0.5 , 1 , 2 , 3
 do
  for sample in 1 , 2 , 3 , 4 , 5 , 6
   do 

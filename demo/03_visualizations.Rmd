@@ -1,0 +1,358 @@
+---
+title: "03_visualization"
+output: html_document
+date: '2023-06-05'
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggpubr)
+library(viridis)
+library(edgeR)
+library(data.table)
+library(viridis)
+library(data.table)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(Repitools)
+library(pheatmap)
+```
+
+# Counts & LFCs 
+
+effect strengths
+```{r}
+es <- c(0.5,1,2,3)
+```
+
+## Load the ATAC-peaks
+
+See 02_peak_calling.Rmd
+```{r, atac peaks}
+atacPeakRanges <- lapply(es, function(i){
+  atacPeaks <- fread(paste0("./sim_data_demo/peaks/", paste("mergedSamples_peaks", i, "peaks", sep="_"), ".narrowPeak"), 
+                   select=1:6, col.names=c("chr", "start", "end", "name", "pile_up", "strand"))
+  
+  ranges <- makeGRangesFromDataFrame(atacPeaks)
+})
+names(atacPeakRanges) <- as.character(es)
+```
+
+## Load the ChIP-peaks
+
+```{r, chip peaks}
+peakTable <- fread("ENCFF723DCX_ctcf.bed", 
+                   col.names=c("chr", "start", "end", "rel_enr"),
+                   select=c(1:3,7))
+
+chIPPeakRanges <- makeGRangesFromDataFrame(as.data.frame(peakTable), 
+                                       keep.extra.columns=TRUE)
+```
+
+## Load the Fragment Counts
+
+### Fragment Counts ATAC Peaks
+```{r, get fragment counts}
+# frag files
+es <- c(0, 0.5,1,2,3)
+simsFrags <- lapply(es, function(i){
+  print(i)
+  simFrags <- readRDS(file.path("./sim_data_demo", paste0(paste("sim_ctcf_lfc_based", "effect", i, sep="_"), ".rds")))
+  simFrags$es <- i
+  simFrags
+})
+names(simsFrags) <- as.character(es)
+simFrags <- rbindlist(simsFrags)
+
+# get counts per peak
+es <- c(0.5,1,2,3)
+atacFragCounts <- lapply(es, function(i){
+  frags <- subset(simFrags, es==i)
+  fragsSamples <- split(frags, by="sample")
+  peakRanges <- atacPeakRanges[[as.character(i)]]
+  fragCounts <- lapply(names(fragsSamples),
+                           function(sample){
+                           atacFrags <- fragsSamples[[sample]]
+                           atacFragRanges <- makeGRangesFromDataFrame(as.data.frame(atacFrags))
+                           atacCounts <- countOverlaps(peakRanges, atacFragRanges)})
+  fragCounts <- do.call("cbind", fragCounts)
+  colnames(fragCounts) <- names(fragsSamples)
+  fragCounts})
+names(atacFragCounts) <- as.character(es)
+```
+
+### Fragment Counts ChIP Peaks
+
+```{r}
+chIPPeakRanges <- subsetByOverlaps(chIPPeakRanges,
+                                   GRanges(Rle("chr1"), IRanges(start=1, width=536870912)))
+
+# get counts per peak
+es <- c(0, 0.5,1,2,3)
+atacFragChIPPeakCounts <- lapply(es, function(i){
+  
+  frags <- subset(simFrags, es==i)
+  fragsSamples <- split(frags, by="sample")
+  
+  fragCounts <- lapply(names(fragsSamples),
+                           function(sample){
+                           atacFrags <- fragsSamples[[sample]]
+                           atacFragRanges <- makeGRangesFromDataFrame(as.data.frame(atacFrags))
+                           atacCounts <- countOverlaps(chIPPeakRanges, atacFragRanges)})
+  
+  fragCounts <- do.call("cbind", fragCounts)
+  colnames(fragCounts) <- names(fragsSamples)
+  fragCounts})
+names(atacFragChIPPeakCounts) <- as.character(es)
+```
+
+## Differential Accessibility Testing
+
+On atac peaks
+```{r, DA testing, eval=TRUE}
+es <- c(0.5,1,2,3)
+daRes <- lapply(es, function(i){
+  fragCounts <- atacFragCounts[[as.character(i)]]
+  
+countsControl <- fragCounts[, colnames(fragCounts)[1:3]]
+countsPerturbed <- fragCounts[, colnames(fragCounts)[4:6]]
+
+cond <- c(rep("ctrl", ncol(countsControl)), 
+          rep("mut", ncol(countsPerturbed)))
+se <- cbind(countsControl, countsPerturbed)
+  
+modelMat <- model.matrix(~cond)
+dge <- DGEList(counts=cbind(countsControl, countsPerturbed))
+dge <- calcNormFactors(dge)
+  
+dge <- estimateGLMCommonDisp(dge, modelMat)
+dge <- estimateGLMTrendedDisp(dge, modelMat) 
+dge <- estimateGLMTagwiseDisp(dge, modelMat)
+fit <- glmFit(dge, modelMat)
+fit <- glmLRT(fit, coef="condmut")
+res <- topTags(fit, n=nrow(dge), sort="none")$table
+rownames(res) <- rownames(dge)
+res$id <- rownames(dge)
+res$es <- i
+res
+})
+
+names(daRes) <- as.character(es)
+daRes <- lapply(daRes, as.data.table)
+daRes <- rbindlist(daRes)
+```
+
+on ChIP Peaks
+```{r}
+es <- c(0, 0.5,1,2,3)
+daChIPRes <- lapply(es, function(i){
+  fragCounts <- atacFragChIPPeakCounts[[as.character(i)]]
+  
+countsControl <- fragCounts[, colnames(fragCounts)[1:3]]
+countsPerturbed <- fragCounts[, colnames(fragCounts)[4:6]]
+
+cond <- c(rep("ctrl", ncol(countsControl)), 
+          rep("mut", ncol(countsPerturbed)))
+se <- cbind(countsControl, countsPerturbed)
+  
+modelMat <- model.matrix(~cond)
+dge <- DGEList(counts=cbind(countsControl, countsPerturbed))
+dge <- calcNormFactors(dge)
+  
+dge <- estimateGLMCommonDisp(dge, modelMat)
+dge <- estimateGLMTrendedDisp(dge, modelMat) 
+dge <- estimateGLMTagwiseDisp(dge, modelMat)
+fit <- glmFit(dge, modelMat)
+fit <- glmLRT(fit, coef="condmut")
+res <- topTags(fit, n=nrow(dge), sort="none")$table
+rownames(res) <- rownames(dge)
+res$id <- rownames(dge)
+res$es <- i
+res
+})
+
+names(daChIPRes) <- as.character(es)
+daChIPRes <- lapply(daChIPRes, as.data.table)
+daChIPRes <- rbindlist(daChIPRes)
+```
+
+# Diagnostic Plots
+
+## Sequencing Depth
+
+```{r, sequencing depth}
+simFrags[,.N,by=c("sample", "group")]
+```
+
+## Overlap peaks 
+
+```{r}
+ovPeaks <- lapply(atacPeakRanges, subsetByOverlaps, chIPPeakRanges)
+lapply(1:length(ovPeaks),function(i){length(ovPeaks[[i]])/length(atacPeakRanges[[i]])})
+```
+
+## log FCs distributions
+
+Histograms of log FC distributions (peaks called on atac data)
+```{r}
+daRes <- as.data.table(daRes)
+ggplot(daRes, aes(x=logFC))+geom_histogram()+facet_wrap(~es, nrow=1)
+ggplot(daRes, aes(y=as.factor(es), x=logFC))+geom_boxplot()
+```
+
+Histogram of log FC distributions on chIP peaks
+```{r}
+ggplot(daChIPRes, aes(x=logFC))+geom_histogram()+facet_wrap(~es, nrow=1)
+ggplot(daChIPRes, aes(y=as.factor(es), x=logFC))+geom_violin()+geom_boxplot()
+```
+LogFC distribution per peak sampled => used to scale up or down: 
+```{r}
+peakTable[,rel_enr:=scale(rel_enr, center=TRUE, scale=TRUE)]
+peakTable <- subset(peakTable, chr=="chr1")
+
+es <- c(0,0.5,1,2,3)
+lfc <- lapply(es, function(i){
+  lfc <- readRDS(paste0("./sim_data_demo/lfcs_", i, ".rds"))
+  lfc <- data.table(logFC=lfc)
+  lfc <- cbind(lfc, peakTable)
+  lfc
+})
+names(lfc) <- es
+lfcDist <- rbindlist(lfc, idcol="es")
+lfcDist$type <- "sampled"
+
+# observed
+lfcs <- readRDS("log_fcs_yy1.rds")
+enr <- readRDS("rel_enr_yy1.rds")
+lfcDistDtOb <- data.table(rel_enr=enr,
+                        logFC=lfcs)
+lfcDistDtOb[,rel_enr:=scale(rel_enr, center=TRUE, scale=TRUE)]
+lfcDistDtOb$es <- 0
+lfcDistDtOb$type <- "observed"
+lfcDist <- rbind(lfcDist, lfcDistDtOb, fill=TRUE)
+lfcDist[,type:=paste(type, es, sep="_")]
+
+ggplot(lfcDist, aes(y=logFC, x=rel_enr))+
+  geom_density2d_filled()+facet_wrap(~type, nrow=1)+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("Sampled")+
+  xlab("Relative Enrichment")+
+  ylab("Log FCs")+
+  xlim(c(-2.5,2.5))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+Distribution of scaled relative enrichments:
+```{r}
+relEnrDt <- data.table(rel_enr=c(peakTable$rel_enr, lfcDistDtOb$rel_enr),
+                       tf_exp=c(rep("CTCF encode", nrow(peakTable)),
+                                rep("YY1 haploins.", nrow(lfcDistDtOb))))
+
+ggplot(relEnrDt, aes(x=rel_enr))+
+  geom_histogram()+facet_wrap(~tf_exp, nrow=2)+
+  ggtitle("Relative Enrichment")+
+  xlab("Relative Enrichment")+
+  xlim(c(-2.5,2.5))+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+
+LogFC distribution obtained vs enrichment (chIP Peaks)
+```{r}
+peakTable[,rel_enr:=scale(rel_enr, center=TRUE, scale=TRUE)]
+lfcDist <- cbind(daChIPRes, do.call("rbind", replicate(length(es), peakTable, simplify = FALSE)))
+samp <- ggplot(lfcDist, aes(y=logFC, x=rel_enr))+
+  geom_density2d_filled()+facet_wrap(~es, nrow=1)+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("Sampled")+
+  xlab("Relative Enrichment")+
+  ylab("Log FCs")+
+  xlim(c(-2.5,2.5))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+samp
+```
+
+## Effect Strength
+
+Heatmap of Effect Strength (atac peaks). Top 100 peaks per effect strength.
+```{r}
+# Have the heatmaps next to each other split up by conditions
+es <- c(0.5,1,2,3)
+mats <- lapply(es, function(i){
+fragMat <- atacFragCounts[[as.character(i)]]
+daEs <- subset(daRes, es==i)
+topPeaks <- head(order(daEs$FDR), 500)
+colnames(fragMat) <- c(paste(paste("sample", 1:6, sep="_"), i,sep="_"))
+fragMat[topPeaks,]
+#fragMat
+})
+
+mats <- do.call("cbind", mats)
+
+annotationCol <- data.frame(sample=rep(paste("sample", 1:6, sep="_"), length(es)),
+                            group=rep(c(rep("group1", 3), rep("group2", 3)), length(es)),
+                           es=rep(es, each=6))
+rownames(annotationCol) <- colnames(mats)
+ph <- pheatmap(mats, 
+               cluster_rows=TRUE, 
+               cluster_cols=FALSE,
+               annotation_col = annotationCol,
+               color=inferno(30),
+               scale="row",
+               treeheight_row=0,
+               show_colnames=TRUE)
+ph
+```
+
+
+Heatmap of Effect strength (chIP peaks). Same peaks across effect strengths
+```{r}
+topPeaks <- head(order(subset(daChIPRes, es==3)$FDR), 100)
+
+# Have the heatmaps next to each other split up by conditions
+mats <- lapply(es, function(i){
+fragMat <- atacFragChIPPeakCounts[[as.character(i)]]
+daEs <- subset(daRes, es==i)
+colnames(fragMat) <- c(paste(paste("sample", 1:6, sep="_"), i,sep="_"))
+fragMat[topPeaks,]
+})
+
+mats <- do.call("cbind", mats)
+annotationCol <- data.frame(sample=rep(paste("sample", 1:6, sep="_"), length(es)),
+                            group=rep(c(rep("group1", 3), rep("group2", 3)), length(es)),
+                           es=rep(es, each=6))
+rownames(annotationCol) <- colnames(mats)
+ph <- pheatmap(mats, 
+               cluster_rows=TRUE, 
+               cluster_cols=FALSE,
+               annotation_col = annotationCol,
+               color=inferno(30),
+               scale="row",
+               treeheight_row=0,
+               show_colnames=TRUE)
+ph
+```
+
+
+## Per Sample GC distribution
+
+```{r}
+ggplot(simFrags, aes(x=gc_content, fill=group))+
+geom_histogram()+
+facet_grid(rows=vars(es), cols=vars(sample))+
+theme_bw()
+```
+
+## Per Sample Fragment Length distribution
+
+```{r}
+ggplot(simFrags, aes(x=width, fill=group))+
+geom_histogram()+
+facet_grid(rows=vars(es), cols=vars(sample))+
+xlim(c(0,500))+
+theme_bw()
+```
