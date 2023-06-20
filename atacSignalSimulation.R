@@ -306,16 +306,16 @@ sampleSwitch <- function(total, size){
   }
   
   # Only sample from positive logFcs run for multiple samples
-  if(nrow(fragsInPeaks[logFC<0,])>0)
+  if(nrow(fragsInPeaks[logFC>0,])>0)
   {
-    fragsInPeaksSub <- fragsInPeaks[logFC<0,][,.SD[sampleSwitch(.N, data.table::first(nFrags))], by=id]
+    fragsInPeaksSub <- fragsInPeaks[logFC>0,][,.SD[sampleSwitch(.N, data.table::first(nFrags))], by=id]
   }
   else
   {
-    fragsInPeaksSub <- fragsInPeaks[logFC<0,]
+    fragsInPeaksSub <- fragsInPeaks[logFC>0,]
   }
   
-  fragsInPeaksSub <- rbind(fragsInPeaksSub, fragsInPeaks[logFC>=0,])
+  fragsInPeaksSub <- rbind(fragsInPeaksSub, fragsInPeaks[logFC<=0,])
   fragsInPeaksSub <- fragsInPeaksSub[,c("seqnames", "i.start", "i.end"), with=FALSE]
   colnames(fragsInPeaksSub) <- c("seqnames", "start", "end")
   
@@ -527,7 +527,7 @@ simAtacData <- function(bamPaths,
                               bedPath=bedPath, 
                               biasFileDir=negGcBiases[i],
                               sampleName=negSampleNames[i],
-                              logFCs=logFCs,
+                              logFCs=logFCs*-1,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup2$fracSub[1],
