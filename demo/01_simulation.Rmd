@@ -156,6 +156,8 @@ for(es in c(0,0.5,1,2,3))
   # bed file format: chrom, start, end, name
   bedSim <- simFrags[,c("seqnames", "start", "end", "sample", "gc_content", "strand"), with=FALSE]
   bedSim$strand <- "."
+  bedSim$score <- 0L
+  bedSim$name <- "."
   bedSimMerged <- copy(bedSim)
   bedSimMerged$sample <- "merged"
   colnames(bedSimMerged) <- c("chrom", "chromStart", "chromEnd", "name", "score", "strand")
@@ -163,7 +165,7 @@ for(es in c(0,0.5,1,2,3))
   # save merged bed file
   setorder(bedSimMerged, chrom, chromStart, chromEnd)
   filePath <- file.path(outDir, paste0(paste("mergedSamples", "lfc_based", es, sep="_"), ".bed"))
-  write.table(bedSimMerged[,c("chrom", "chromStart", "chromEnd"), with=FALSE], filePath, 
+  write.table(bedSimMerged[,c("chrom", "chromStart", "chromEnd", "name", "score", "strand"), with=FALSE], filePath, 
               quote=FALSE, col.names=FALSE,
               sep="\t", 
              row.names=FALSE)
@@ -173,7 +175,7 @@ for(es in c(0,0.5,1,2,3))
   lapply(names(bedSim),function(sample){
     setorder(bedSim[[sample]], seqnames, start, end)
     filePath <- file.path(outDir, paste0(paste(sample, "lfc_based", es, sep="_"), ".bed"))
-    write.table(bedSim[[sample]][,c("seqnames", "start", "end"), with=FALSE], filePath, 
+    write.table(bedSim[[sample]][,c("seqnames", "start", "end", "name", "score", "strand"), with=FALSE], filePath, 
                 quote=FALSE, col.names=FALSE,
                 sep="\t", 
                 row.names=FALSE)})
