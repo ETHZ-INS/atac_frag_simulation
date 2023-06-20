@@ -369,6 +369,7 @@ varyAtacSignal <- function(bamPath,
                            minGC=0,
                            maxGC=1,
                            simGCBias=TRUE,
+                           simFLD=TRUE,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
 {
@@ -385,13 +386,15 @@ varyAtacSignal <- function(bamPath,
                                 minGC, maxGC, annotationStyle, genome)
   }
   
-  # Vary Frag Dist
-  fragsSubset <- .varyFragDist(frags, fracSub, nClust=nFragTypes,
-                               fitGMM=fitGMM, prob=prob, 
-                               estimateProb=estimateProb)
-  
+  if(simFLD)
+  {
+    # Vary Frag Dist
+    frags <- .varyFragDist(frags, fracSub, nClust=nFragTypes,
+                                 fitGMM=fitGMM, prob=prob, 
+                                 estimateProb=estimateProb)
+  }
   # Vary Effect size
-  fragsSubset <- .varEffectSize(fragsSubset, peaks, effectStrength, logFCs=logFCs)
+  fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=logFCs)
   
   # Get indices of read pairs to keep
   readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
@@ -463,6 +466,7 @@ simAtacData <- function(bamPaths,
                         minGC=0,
                         maxGC=1,
                         simGCBias=TRUE,
+                        simFLD=TRUE,
                         annotationStyle="NCBI",
                         genome=BSgenome.Hsapiens.UCSC.hg38){
   
@@ -498,6 +502,7 @@ simAtacData <- function(bamPaths,
                               which=which,
                               minOverlap=minOverlap,
                               simGCBias=TRUE,
+                              simFLD=TRUE, 
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -534,6 +539,7 @@ simAtacData <- function(bamPaths,
                               which=which,
                               minOverlap=minOverlap,
                               simGCBias=TRUE,
+                              simFLD=TRUE,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
