@@ -381,7 +381,7 @@ varyAtacSignal <- function(bamPath,
   # Vary GC Bias
   if(simGCBias)
   {
-    fragsSubset <- .varyGCBias(frags, biasFileDir, fracSub,
+    frags <- .varyGCBias(frags, biasFileDir, fracSub,
                                 minGC, maxGC, annotationStyle, genome)
   }
   
