@@ -7,11 +7,13 @@ library(MASS)
 library(mclust)
 library(Repitools)
 
+setDTthreads(2)
+
 first <- data.table::first
 
-sampleSwitch <- function(total, size){
+sampleSwitch <- function(total, size){ setDTthreads(2)
   if(total >= size)
-  {
+  {setDTthreads(2)
     s <- sample(total, size=size, replace=FALSE)
   }
   else
@@ -23,7 +25,7 @@ sampleSwitch <- function(total, size){
 }
 
 .importFrags <- function(bamPath, which=NULL, annotationStyle="NCBI")
-{
+{setDTthreads(2)
   if(is.null(which))
   {
     which <- GRanges(Rle(1:22), 
@@ -56,7 +58,7 @@ sampleSwitch <- function(total, size){
 .importPeaks <- function(peaksDir, 
                          which=NULL, 
                          annotationStyle="NCBI")
-{
+{setDTthreads(2)
   peaks <- fread(peaksDir, select=1:3)
   colnames(peaks) <- c("chr", "start", "end")
   
@@ -74,7 +76,7 @@ sampleSwitch <- function(total, size){
                     lfcDist,
                     nBins=100, 
                     enrCol="rel_enr")
-{
+{setDTthreads(2)
   enrPeakDt <- as.data.table(enrichment)
   lfcDistDt <- as.data.table(lfcDist)
   
@@ -115,7 +117,7 @@ sampleSwitch <- function(total, size){
                        frac=0.2, 
                        minOverlap=1, 
                        annotationStyle="NCBI")
-{
+{setDTthreads(2)
   # Subset to "primary" signal peaks
   fragsPeaks <- suppressWarnings(subsetByOverlaps(frags, peaks, minoverlap=minOverlap))
   fragsOut <- suppressWarnings(subsetByOverlaps(frags, peaks, invert = TRUE))
@@ -136,7 +138,7 @@ sampleSwitch <- function(total, size){
                         maxGC=1,
                         annotationStyle="NCBI",
                         genome=BSgenome.Hsapiens.UCSC.hg38)
-{
+{setDTthreads(2)
   # Import GC bias table (output deeptools)
   gcBiasTable <- fread(biasFileDir, select=1:3,
                        col.names=c("observed_read_count", 
@@ -192,7 +194,7 @@ sampleSwitch <- function(total, size){
                           referenceData=NULL,
                           prob=c(0.5, 0.4, 0.08, 0.02),
                           estimateProb=FALSE)
-{
+{setDTthreads(2)
   if(fitGMM)
   {
     # Estimate fragment length distributions
@@ -226,7 +228,7 @@ sampleSwitch <- function(total, size){
   nSample <- round(nrow(fragsTable)*frac)
   nFragsType <- round(nSample*prob)
   
-  fragsSubTable <- lapply(1:nClust, function(i){
+  fragsSubTable <- lapply(1:nClust, function(i){setDTthreads(2)
     sampledFrags <- fragsTable[cluster==i, ][sampleSwitch(.N, nFragsType[i]),]
   })
   
@@ -263,7 +265,7 @@ sampleSwitch <- function(total, size){
                            effectStrength=0.5,
                            noiseLevel=0.1
                            #mode=c("scale", "plain")
-){
+){setDTthreads(2)
   
   #mode <- mode[1]
   
@@ -370,7 +372,7 @@ varyAtacSignal <- function(bamPath,
                            maxGC=1,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
-{
+{setDTthreads(2)
   # Import fragments and peaks
   bamData <- .importFrags(bamPath, which, annotationStyle)
   frags <- bamData$fragments
@@ -475,7 +477,7 @@ simAtacData <- function(bamPaths,
   posSampleNames <- sampleNames[which(design==1)]
   posGcBiases <- gcBiases[which(design==1)]
   
-  simSamplesPos <- lapply(1:length(posSamples), function(i){
+  simSamplesPos <- lapply(1:length(posSamples), function(i){setDTthreads(2)
     
     simData <- varyAtacSignal(bamPath=posSamples[i], 
                               bedPath=bedPath, 
@@ -510,7 +512,7 @@ simAtacData <- function(bamPaths,
   negSampleNames <- sampleNames[which(design==-1)]
   negGcBiases <- gcBiases[which(design==-1)]
   
-  simSamplesNeg <- lapply(1:length(negSamples), function(i){
+  simSamplesNeg <- lapply(1:length(negSamples), function(i){setDTthreads(2)
     
     simData <- varyAtacSignal(bamPath=negSamples[i], 
                               bedPath=bedPath, 
