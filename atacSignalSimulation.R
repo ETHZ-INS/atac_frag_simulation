@@ -308,16 +308,16 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   }
   
   # Only sample from positive logFcs run for multiple samples
-  if(nrow(fragsInPeaks[logFC<0,])>0)
+  if(nrow(fragsInPeaks[logFC>0,])>0)
   {
-    fragsInPeaksSub <- fragsInPeaks[logFC<0,][,.SD[sampleSwitch(.N, data.table::first(nFrags))], by=id]
+    fragsInPeaksSub <- fragsInPeaks[logFC>0,][,.SD[sampleSwitch(.N, data.table::first(nFrags))], by=id]
   }
   else
   {
-    fragsInPeaksSub <- fragsInPeaks[logFC<0,]
+    fragsInPeaksSub <- fragsInPeaks[logFC>0,]
   }
   
-  fragsInPeaksSub <- rbind(fragsInPeaksSub, fragsInPeaks[logFC>=0,])
+  fragsInPeaksSub <- rbind(fragsInPeaksSub, fragsInPeaks[logFC<=0,])
   fragsInPeaksSub <- fragsInPeaksSub[,c("seqnames", "i.start", "i.end"), with=FALSE]
   colnames(fragsInPeaksSub) <- c("seqnames", "start", "end")
   
@@ -370,6 +370,8 @@ varyAtacSignal <- function(bamPath,
                            minOverlap=1,
                            minGC=0,
                            maxGC=1,
+                           simGCBias=TRUE,
+                           simFLD=TRUE,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
 {setDTthreads(2)
@@ -380,16 +382,21 @@ varyAtacSignal <- function(bamPath,
   peaks <- .importPeaks(bedPath, which, annotationStyle)
   
   # Vary GC Bias
-  fragsSubset <- .varyGCBias(frags, biasFileDir, fracSub,
-                             minGC, maxGC, annotationStyle, genome)
+  if(simGCBias)
+  {
+    frags <- .varyGCBias(frags, biasFileDir, fracSub,
+                                minGC, maxGC, annotationStyle, genome)
+  }
   
-  # Vary Frag Dist
-  fragsSubset <- .varyFragDist(fragsSubset, fracSub, nClust=nFragTypes,
-                               fitGMM=fitGMM, prob=prob, 
-                               estimateProb=estimateProb)
-  
+  if(simFLD)
+  {
+    # Vary Frag Dist
+    frags <- .varyFragDist(frags, fracSub, nClust=nFragTypes,
+                                 fitGMM=fitGMM, prob=prob, 
+                                 estimateProb=estimateProb)
+  }
   # Vary Effect size
-  fragsSubset <- .varEffectSize(fragsSubset, peaks, effectStrength, logFCs=logFCs)
+  fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=logFCs)
   
   # Get indices of read pairs to keep
   readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
@@ -460,6 +467,8 @@ simAtacData <- function(bamPaths,
                         minOverlap=1,
                         minGC=0,
                         maxGC=1,
+                        simGCBias=TRUE,
+                        simFLD=TRUE,
                         annotationStyle="NCBI",
                         genome=BSgenome.Hsapiens.UCSC.hg38){
   
@@ -494,6 +503,8 @@ simAtacData <- function(bamPaths,
                               estimateProb=paramsGroup1$estimateProb,
                               which=which,
                               minOverlap=minOverlap,
+                              simGCBias=TRUE,
+                              simFLD=TRUE, 
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -518,7 +529,7 @@ simAtacData <- function(bamPaths,
                               bedPath=bedPath, 
                               biasFileDir=negGcBiases[i],
                               sampleName=negSampleNames[i],
-                              logFCs=logFCs,
+                              logFCs=logFCs*-1,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup2$fracSub[1],
@@ -529,6 +540,8 @@ simAtacData <- function(bamPaths,
                               estimateProb=paramsGroup2$estimateProb,
                               which=which,
                               minOverlap=minOverlap,
+                              simGCBias=TRUE,
+                              simFLD=TRUE,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -550,5 +563,10 @@ simAtacData <- function(bamPaths,
   minDepth <- min(simSamples[,.N,by=sample]$N)
   simSamples <- simSamples[,.SD[sample(.N, minDepth)],by = sample]
   
+  # adding dummy cols 
+  #simSamples$strand <- "*"
+  #simSamples$name <- "."
+  #simSample$score <- 0L
+    
   return(list(sim=simSamples, lfc=logFCs))
 }
