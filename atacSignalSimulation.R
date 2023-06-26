@@ -86,7 +86,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   lfcDistDt[,bin:=findInterval(get(enrCol), bins)]
   lfcDistDt[,bin_start:=bins[bin]]
   lfcDistDt[,bin_end:=bins[bin+1]]
-  lfcDistDt[is.na(bin_end),]$bin_end <- 500
+  lfcDistDt[is.na(bin_end),]$bin_end <- 1e4
   lfcDistDt[bin_start==min(bin_start),]$bin_start <- -500
   
   # sample values from respective bins
