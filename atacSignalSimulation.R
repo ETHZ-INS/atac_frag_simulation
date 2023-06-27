@@ -75,39 +75,53 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
 .estLfc <- function(enrichment, 
                     lfcDist,
                     nBins=100, 
-                    enrCol="rel_enr")
+                    enrCol="rel_enr",
+                    lfcCol="lfc")
 {setDTthreads(2)
   enrPeakDt <- as.data.table(enrichment)
   lfcDistDt <- as.data.table(lfcDist)
   
+  # empirical cdf of observed enrichments
+  lfcCDF <- ecdf(lfcDistDt[[enrCol]])
+  
+  # quantile normalization of enrichment over input of ChIP-peaks
+  normEnr <- preprocessCore::normalize.quantiles.use.target(matrix(enrPeakDt[[enrCol]], ncol=1),
+                                            target=lfcDistDt[[enrCol]], copy=FALSE)
+  enrSampQuant <- lfcCDF(normEnr)
+  lfcSamp <- quantile(lfcDistDt[[lfcCol]], enrSampQuant)
+  
+  enrPeakDt$quant <- enrSampQuant
+  enrPeakDt$lfc <- lfcSamp
+  enrPeakDt[,peak_id:=1:nrow(enrPeakDt)]
+  
   # bin enrichment values
-  bins <- seq(min(lfcDistDt[[enrCol]]), 
-              max(lfcDistDt[[enrCol]]), length.out=nBins)
-  lfcDistDt[,bin:=findInterval(get(enrCol), bins)]
-  lfcDistDt[,bin_start:=bins[bin]]
-  lfcDistDt[,bin_end:=bins[bin+1]]
-  lfcDistDt[is.na(bin_end),]$bin_end <- 1e4
-  lfcDistDt[bin_start==min(bin_start),]$bin_start <- -500
+  #bins <- seq(min(lfcDistDt[[enrCol]]), 
+  #            max(lfcDistDt[[enrCol]]), length.out=nBins)
+  #lfcDistDt[,bin:=findInterval(get(enrCol), bins)]
+  #lfcDistDt[,bin_start:=bins[bin]]
+  #lfcDistDt[,bin_end:=bins[bin+1]]
+  #lfcDistDt[is.na(bin_end),]$bin_end <- 1e4
+  #lfcDistDt[bin_start==min(bin_start),]$bin_start <- -1e4
   
   # sample values from respective bins
   # overlap by which bin contains 
-  enrPeakDt[,peak_id:=1:nrow(enrPeakDt)]
-  enrPeakDt[,start:=get(enrCol)]
-  enrPeakDt[,end:=get(enrCol)]
-  
-  setkey(lfcDistDt, bin_start, bin_end)
-  enrPeakDt <- foverlaps(enrPeakDt, 
-                         lfcDistDt[,c("bin_start", "bin_end", "lfc")], 
-                         by.x=c("start", "end"),
-                         by.y=c("bin_start", "bin_end"),
-                         type=c("any"))
-  enrPeakDt$start <- NULL
-  enrPeakDt$end <- NULL
-  
-  # sample one value per bin
-  enrPeakDt <- enrPeakDt[,.SD[sample(.N, 1)],by=peak_id]
-  enrPeakDt[,lfc:=fifelse(is.na(lfc), 0, lfc)]
-  setorder(enrPeakDt, peak_id)
+  # enrPeakDt[,peak_id:=1:nrow(enrPeakDt)]
+  # enrPeakDt[,start:=get(enrCol)]
+  # enrPeakDt[,end:=get(enrCol)]
+  # 
+  # setkey(lfcDistDt, bin_start, bin_end)
+  # enrPeakDt <- foverlaps(enrPeakDt, 
+  #                        lfcDistDt[,c("bin_start", "bin_end", "lfc")], 
+  #                        by.x=c("start", "end"),
+  #                        by.y=c("bin_start", "bin_end"),
+  #                        type=c("any"))
+  # enrPeakDt$start <- NULL
+  # enrPeakDt$end <- NULL
+  # 
+  # # sample one value per bin
+  # enrPeakDt <- enrPeakDt[,.SD[sample(.N, 1)],by=peak_id]
+  # enrPeakDt[,lfc:=fifelse(is.na(lfc), 0, lfc)]
+  # setorder(enrPeakDt, peak_id)
   
   return(enrPeakDt)
 }
