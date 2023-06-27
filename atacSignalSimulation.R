@@ -79,6 +79,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                     lfcCol="lfc")
 {setDTthreads(2)
   enrPeakDt <- as.data.table(enrichment)
+  colnames(enrPeakDt) <- enrCol
   lfcDistDt <- as.data.table(lfcDist)
   
   # empirical cdf of observed enrichments
