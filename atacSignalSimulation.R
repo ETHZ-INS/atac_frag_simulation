@@ -75,7 +75,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
 .estLfc <- function(enrichment, 
                     lfcDist,
                     nBins=100, 
-                    enrCol="rel_enr",
+                    enrCol="enr",
                     lfcCol="lfc")
 {setDTthreads(2)
   enrPeakDt <- as.data.table(enrichment)
@@ -102,7 +102,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   #lfcDistDt[,bin_end:=bins[bin+1]]
   #lfcDistDt[is.na(bin_end),]$bin_end <- 1e4
   #lfcDistDt[bin_start==min(bin_start),]$bin_start <- -1e4
-  
+
   # sample values from respective bins
   # overlap by which bin contains 
   # enrPeakDt[,peak_id:=1:nrow(enrPeakDt)]
@@ -401,6 +401,11 @@ varyAtacSignal <- function(bamPath,
     frags <- .varyGCBias(frags, biasFileDir, fracSub,
                                 minGC, maxGC, annotationStyle, genome)
   }
+  else
+  { frags <- as.data.table(frags) 
+    }
+    
+  
   
   if(simFLD)
   {
