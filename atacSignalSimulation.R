@@ -341,6 +341,19 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   return(fragsSubset)
 }
 
+# atacLogFcs <- take opposite signs as Peak logFCs
+
+.varRandomPeaks <- function(frags, peaks, atacPeaks, effectStrength, logFCs){
+  
+  atacSolely <- setdiff(atacPeaks, peaks)
+  
+  # quantile normalize atac enrichment over input => sample from the same distribution
+  
+  # how many to upsample and which: Either completely random or the ones in similar GC bins
+  
+  stop("Not yet implemented")
+}
+
 #' Function to vary different ATAC-seq properties
 #'
 #' Function to vary different Atac-seq related properties by subsampling fragments.
@@ -373,7 +386,8 @@ varyAtacSignal <- function(bamPath,
                            bedPath, 
                            biasFileDir,
                            sampleName,
-                           logFCs,
+                           chIPlogFCs,
+                           atacLogFCs,
                            which=NULL, 
                            fracSub=0.8,
                            effectStrength=0.5,
@@ -386,6 +400,7 @@ varyAtacSignal <- function(bamPath,
                            maxGC=1,
                            simGCBias=TRUE,
                            simFLD=TRUE,
+                           varyAtacPeaks=TRUE,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
 {setDTthreads(2)
@@ -394,6 +409,8 @@ varyAtacSignal <- function(bamPath,
   frags <- bamData$fragments
   readPairs <- bamData$readPairs
   peaks <- .importPeaks(bedPath, which, annotationStyle)
+  
+  atacPeaks <- .importPeaks(bedPathAtacPeaks, which, annotationStyle)
   
   # Vary GC Bias
   if(simGCBias)
@@ -414,8 +431,24 @@ varyAtacSignal <- function(bamPath,
                                  fitGMM=fitGMM, prob=prob, 
                                  estimateProb=estimateProb)
   }
-  # Vary Effect size
-  fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=logFCs)
+  
+  # Vary Effect size of ChIP-peaks
+  fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs)
+  
+  # like this correspondance to logFCs is lost
+  if(varyAtacPeaks)
+  {
+    atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
+    atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
+    
+    atacSubSolePeakDt <-  atacSolePeakDt[sample(min(nrow(atacSubSolePeakDt), 
+                                                    length(peaks)),
+                                                1:nrow(atacSubSolePeakDt)),]
+    atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
+    fragsSubset <- .varEffectSize(frags, atacSubSolePeakRanges, 
+                                  effectStrength, 
+                                  logFCs=atacSubSolePeakDt$logFCs)
+  }
   
   # Get indices of read pairs to keep
   readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
@@ -473,12 +506,14 @@ varyAtacSignal <- function(bamPath,
 #' @return data.table with subsampled fragment coordinates & .bam file of these fragments saved on disk.
 simAtacData <- function(bamPaths, 
                         bedPath, 
+                        bedPathAtacPeaks,
                         sampleNames,
                         gcBiases, 
                         design,
                         paramsGroup1,
                         paramsGroup2, 
                         enrichment,
+                        atacEnrichment,
                         lfcDist,
                         which=NULL,
                         effectStrength=2,
@@ -488,6 +523,7 @@ simAtacData <- function(bamPaths,
                         maxGC=1,
                         simGCBias=TRUE,
                         simFLD=TRUE,
+                        varyAtacPeaks=TRUE,
                         annotationStyle="NCBI",
                         genome=BSgenome.Hsapiens.UCSC.hg38){
   
@@ -495,10 +531,14 @@ simAtacData <- function(bamPaths,
   seqlevelsStyle(enrichment) <- annotationStyle
   enrichment <- subsetByOverlaps(enrichment, which)
   
-  # estimate logFCs
+  # estimate ChIP-peak logFCs
   peakDt <- .estLfc(enrichment, lfcDist)
-  logFCs <- peakDt$lfc
-  print(table(logFCs<0))
+  chIPlogFCs <- peakDt$lfc
+  print(table(chIPlogFCs<0))
+  
+  # estimate ATAC-peak logFCs
+  atacPeakDt <- .estLfc(atacEnrichment, lfcDist)
+  atacLogFCs <- atacPeakDt$lfc
   
   # Positive samples
   posSamples <- bamPaths[which(design==1)]
@@ -509,9 +549,11 @@ simAtacData <- function(bamPaths,
     
     simData <- varyAtacSignal(bamPath=posSamples[i], 
                               bedPath=bedPath, 
+                              bedPathAtacPeaks=bedPathAtacPeaks,
                               biasFileDir=posGcBiases[i],
                               sampleName=posSampleNames[i],
-                              logFCs=logFCs,
+                              chIPlogFCs=chIPlogFCs,
+                              atacLogFCs=atacLogFCs*-1,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup1$fracSub[1],
@@ -524,6 +566,7 @@ simAtacData <- function(bamPaths,
                               minOverlap=minOverlap,
                               simGCBias=simGCBias,
                               simFLD=simFLD, 
+                              varyAtacPeaks=varyAtacPeaks,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -546,9 +589,11 @@ simAtacData <- function(bamPaths,
     
     simData <- varyAtacSignal(bamPath=negSamples[i], 
                               bedPath=bedPath, 
+                              bedPathAtacPeaks=bedPathAtacPeaks,
                               biasFileDir=negGcBiases[i],
                               sampleName=negSampleNames[i],
-                              logFCs=logFCs*-1,
+                              chIPlogFCs=chIPlogFCs*-1,
+                              atacLogFCs=atacLogFCs,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup2$fracSub[1],
@@ -561,6 +606,7 @@ simAtacData <- function(bamPaths,
                               minOverlap=minOverlap,
                               simGCBias=simGCBias,
                               simFLD=simFLD,
+                              varyAtacPeaks=varyAtacPeaks,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -587,5 +633,5 @@ simAtacData <- function(bamPaths,
   #simSamples$name <- "."
   #simSample$score <- 0L
     
-  return(list(sim=simSamples, lfc=logFCs))
+  return(list(sim=simSamples, lfc=chIPlogFCs))
 }
