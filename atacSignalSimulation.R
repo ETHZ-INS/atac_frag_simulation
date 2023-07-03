@@ -442,9 +442,8 @@ varyAtacSignal <- function(bamPath,
     atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
     atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
     
-    atacSubSolePeakDt <-  atacSolePeakDt[sample(min(nrow(atacSubSolePeakDt), 
-                                                    length(peaks)),
-                                                1:nrow(atacSubSolePeakDt)),]
+    atacSubSolePeakDt <-  atacSolePeakDt[sample(1:nrow(atacSolePeakDt), min(nrow(atacSolePeakDt), 
+                                                    length(peaks))),]
     atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
     fragsSubset <- .varEffectSize(frags, atacSubSolePeakRanges, 
                                   effectStrength, 
