@@ -76,7 +76,8 @@ genome <- BSgenome.Hsapiens.UCSC.hg38
 
 Here we dont need any params as we dont change gc bias or fld (just empty data.tables)
 ```{r params group}
-paramsGroup1 <- data.table()
+paramsGroup1 <- data.table(gcBiases=NULL, prob_nf=NULL, prob_mono=NULL,
+                           prob_di=NULL, prob_tri=NULL)
 
 paramsGroup2 <- paramsGroup1
 paramsGroup1$name <- "group1"
@@ -90,8 +91,8 @@ simData <- simAtacData(bamDirs,
                        atacPeakDir=atacPeaksDir,
                        sampleNames=sampleNames,
                        design=design,
-                       paramsGroup1,
-                       paramsGroup2, 
+                       paramsGroup1=paramsGroup1,
+                       paramsGroup2=paramsGroup2, 
                        lfcDist=lfcDistDt,
                        which=which,
                        effectStrength=1,

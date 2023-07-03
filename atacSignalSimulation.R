@@ -553,7 +553,14 @@ simAtacData <- function(bamPaths,
   # Positive samples
   posSamples <- bamPaths[which(design==1)]
   posSampleNames <- sampleNames[which(design==1)]
-  posGcBiases <- gcBiases[which(design==1)]
+  
+  if(simGCBias)
+  {
+    posGcBiases <- posGcBiases[which(design==-1)]
+  }
+  else
+  {posGcBiases <- NULL}
+  
   
   simSamplesPos <- lapply(1:length(posSamples), function(i){setDTthreads(2)
     
@@ -593,7 +600,13 @@ simAtacData <- function(bamPaths,
   # Negative samples
   negSamples <- bamPaths[which(design==-1)]
   negSampleNames <- sampleNames[which(design==-1)]
-  negGcBiases <- gcBiases[which(design==-1)]
+  
+  if(simGCBias)
+  {
+    negGcBiases <- gcBiases[which(design==-1)]
+  }
+  else
+  {negGcBiases <- NULL}
   
   simSamplesNeg <- lapply(1:length(negSamples), function(i){setDTthreads(2)
     
