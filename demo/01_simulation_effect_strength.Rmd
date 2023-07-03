@@ -1,0 +1,115 @@
+---
+title: "test_simulations"
+output: html_document
+date: '2023-02-21'
+---
+
+```{r setup, include=FALSE}
+library(Repitools)
+library(data.table)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(GenomicRanges)
+library(ggplot2)
+
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+
+source("../atacSignalSimulation.R")
+```
+
+The simulations scripts can be found under: /mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations. 
+Here everyhting is shown just for chromosome 1.
+
+# Load the necessary data
+
+## 1. Load the Peak coordinates and the enrichments over the input
+
+Here the column names of the peaks have to be provided to the simulation function. If not the generic narrow peak columns are assumed (see arguments: `colNamesChIPPeaks`, `colNamesAtacPeaks`). 
+```{r, load peaks}
+chIPPeaksDir <- "/mnt/plger/fgerbaldo/BenchmarkTFactivity/Benchmark_data/Simulation/ChIp_peaks/CEBPB.bed.gz"
+atacPeaksDir <- "/mnt/plger/fgerbaldo/BenchmarkTFactivity/Benchmark_data/Simulation/A549_base/peaks/A549_filtered.bed"
+
+atacPeaks <- fread(atacPeaksDir)
+head(atacPeaks, 5)
+
+chIPPeaks <- fread(chIPPeaksDir)
+head(chIPPeaks, 5)
+```
+
+## 2. Load the logFC vs Enrichment Distributions
+
+Here the distribution of the logFC & enrichments in the haploinsufficiency experiment are loaded. The first column of this data.table needs to be enrichment column and the second the log fold change column (with the name, see argument: lfcCol)
+```{r, logFC dist}
+lfcs <- readRDS("log_fcs_yy1.rds")
+enr <- readRDS("rel_enr_yy1.rds")
+
+lfcDistDt <- data.table(enr=enr, lfc=lfcs)
+```
+
+## Fragment data & experimental design
+
+See correlation plot sent in common channel:
+```{r, exp design}
+bamDirs <- c("SRR19572817.bam",
+             "SRR16579104.bam",
+             "SRR19572933.bam",
+             "SRR19572816.bam",
+             "SRR19572818.bam",
+             "SRR16579105.bam")
+bamDirs <- paste0("/mnt/plger/datasets/A549_ATAC/aligned/", bamDirs)
+sampleNames <- c("sample1", "sample2", "sample3",
+                 "sample4", "sample5", "sample6")
+design <- c(1,1,1,-1,-1,-1)
+```
+
+## Which regions to simulate
+
+```{r, load the genome and coords}
+#which <- GRanges(Rle(1:22), IRanges(start=rep(1,22), width=536870912))
+which <- GRanges(Rle(1), IRanges(start=1, width=536870912))
+genome <- BSgenome.Hsapiens.UCSC.hg38
+```
+
+# Simulate 
+
+## Set the params by group 
+```{r params group}
+paramsGroup1 <- data.table(biasFileDirs=biasFileDirWeak,
+                           fracSub=1.0, # fraction of fragments to be considered for GC and FL sampling
+                           prob_nf=0.7,
+                           prob_mono=0.9,
+                           prob_di=0.07,
+                           prob_tri=0.03)
+
+paramsGroup2 <- paramsGroup1
+paramsGroup1$name <- "group1"
+paramsGroup2$name <- "group2"
+```
+
+## Simulate
+```{r}
+simData <- simAtacData(bamDirs, 
+                       chIPPeakDir=chIPPeaksDir, 
+                       atacPeakDir=atacPeaksDir,
+                       sampleNames=sampleNames,
+                       design=design,
+                       paramsGroup1,
+                       paramsGroup2, 
+                       lfcDist=lfcDistDt,
+                       which=which,
+                       effectStrength=1,
+                       simGCBias=FALSE,
+                       simFLD=FALSE,
+                       varyAtacPeaks=TRUE,
+                       annotationStyle="NCBI",
+                       colNamesChIPPeaks=c("chr","start", "end", 
+                                            "name", "score", "strand",
+                                            "signalValue", "pValue", "qValue", "peak"),
+                       colNamesAtacPeaks=c("seqnames","start", "end", 
+                                            "width", "strand", "score",
+                                            "enrichment"),
+                       enrColChIPName="signalValue",
+                       enrColAtacName="enrichment",
+                       lfcCol="lfc",
+                       genome=BSgenome.Hsapiens.UCSC.hg38)
+```
