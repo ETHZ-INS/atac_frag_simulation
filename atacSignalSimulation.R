@@ -384,6 +384,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
 #' @return data.table with subsampled fragment coordinates & .bam file of these fragments saved on disk.
 varyAtacSignal <- function(bamPath, 
                            bedPath, 
+                           bedPathAtacPeaks,
                            biasFileDir,
                            sampleName,
                            chIPlogFCs,
