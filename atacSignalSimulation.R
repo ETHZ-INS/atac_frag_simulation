@@ -431,6 +431,7 @@ varyAtacSignal <- function(bamPath,
   fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs)
   
   # like this correspondance to logFCs is lost
+  print(dim(fragsSubset))
   if(varyAtacPeaks)
   {
     atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
@@ -442,6 +443,7 @@ varyAtacSignal <- function(bamPath,
     fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
                                   effectStrength, 
                                   logFCs=atacSubSolePeakDt$logFCs)
+    print(dim(fragsSubset))
   }
   
   # Get indices of read pairs to keep
@@ -453,14 +455,14 @@ varyAtacSignal <- function(bamPath,
                               id=1:length(readPairs))
   
   fragsSubset[,frag_id:=1:nrow(fragsSubset)]
-  readPairsFragSub <- merge(fragsSubset,
-                            readPairsFrag,
-                            by.x=c("seqnames", "start", "end"),
-                            by.y=c("seqnames", "start", "end"),
-                            allow.cartesian=TRUE, # sample with replacement can cause this behavior
-                            all.x=FALSE)
-  readPairsFragSub <- unique(readPairsFragSub, by=c("frag_id"))
-  readPairsSub <- readPairs[readPairsFragSub$id]
+  # readPairsFragSub <- merge(fragsSubset,
+  #                           readPairsFrag,
+  #                           by.x=c("seqnames", "start", "end"),
+  #                           by.y=c("seqnames", "start", "end"),
+  #                           allow.cartesian=TRUE, # sample with replacement can cause this behavior
+  #                           all.x=FALSE)
+  # readPairsFragSub <- unique(readPairsFragSub, by=c("frag_id"))
+  # readPairsSub <- readPairs[readPairsFragSub$id]
   
   # Convert to GRanges and get GC content
   fragsSubset <- makeGRangesFromDataFrame(fragsSubset)

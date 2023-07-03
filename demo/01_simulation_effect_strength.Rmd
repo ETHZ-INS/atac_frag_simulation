@@ -73,13 +73,10 @@ genome <- BSgenome.Hsapiens.UCSC.hg38
 # Simulate 
 
 ## Set the params by group 
+
+Here we dont need any params as we dont change gc bias or fld (just empty data.tables)
 ```{r params group}
-paramsGroup1 <- data.table(biasFileDirs=biasFileDirWeak,
-                           fracSub=1.0, # fraction of fragments to be considered for GC and FL sampling
-                           prob_nf=0.7,
-                           prob_mono=0.9,
-                           prob_di=0.07,
-                           prob_tri=0.03)
+paramsGroup1 <- data.table()
 
 paramsGroup2 <- paramsGroup1
 paramsGroup1$name <- "group1"
