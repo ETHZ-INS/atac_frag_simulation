@@ -404,15 +404,16 @@ varyAtacSignal <- function(bamPath,
                            varyAtacPeaks=TRUE,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
-{setDTthreads(2)
+{
+  setDTthreads(2)
+  
   # Import fragments and peaks
   bamData <- .importFrags(bamPath, which, annotationStyle)
   frags <- bamData$fragments
   readPairs <- bamData$readPairs
   peaks <- .importPeaks(bedPath, which, annotationStyle)
-  
   atacPeaks <- .importPeaks(bedPathAtacPeaks, which, annotationStyle)
-  
+
   # Vary GC Bias
   if(simGCBias)
   {
@@ -420,11 +421,10 @@ varyAtacSignal <- function(bamPath,
                                 minGC, maxGC, annotationStyle, genome)
   }
   else
-  { frags <- as.data.table(frags) 
-    }
+  {
+    frags <- as.data.table(frags) 
+  }
     
-  
-  
   if(simFLD)
   {
     # Vary Frag Dist
@@ -445,7 +445,7 @@ varyAtacSignal <- function(bamPath,
     atacSubSolePeakDt <-  atacSolePeakDt[sample(1:nrow(atacSolePeakDt), min(nrow(atacSolePeakDt), 
                                                     length(peaks))),]
     atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
-    fragsSubset <- .varEffectSize(frags, atacSubSolePeakRanges, 
+    fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
                                   effectStrength, 
                                   logFCs=atacSubSolePeakDt$logFCs)
   }
