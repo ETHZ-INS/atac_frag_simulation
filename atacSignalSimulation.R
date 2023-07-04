@@ -281,7 +281,8 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                            peaks,
                            logFCs=NULL,
                            effectStrength=0.5,
-                           noiseLevel=0.1
+                           noiseLevel=0.1,
+                           maxReadPerPeak=300
                            #mode=c("scale", "plain")
 ){setDTthreads(2)
   
@@ -328,7 +329,8 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   # Only sample from positive logFcs run for multiple samples
   if(nrow(fragsInPeaks[logFC>0,])>0)
   {
-    fragsInPeaksSub <- fragsInPeaks[logFC>0,][,.SD[sampleSwitch(.N, data.table::first(nFrags))], by=id]
+    fragsInPeaksSub <- fragsInPeaks[logFC>0,][,.SD[sampleSwitch(.N, min(maxReadPerPeak,
+                                                                        data.table::first(nFrags)))], by=id]
   }
   else
   {
@@ -394,6 +396,7 @@ varyAtacSignal <- function(bamPath,
                            simFLD=TRUE,
                            simEffectStrength=TRUE,
                            varyAtacPeaks=TRUE,
+                           maxReadPerPeak=300,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
 {
@@ -431,7 +434,8 @@ varyAtacSignal <- function(bamPath,
   if(simEffectStrength)
   {
     # Vary Effect size of ChIP-peaks
-    fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs)
+    fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs,
+                                  maxReadPerPeak=maxReadPerPeak)
   
   
     # like this correspondance to logFCs is lost
@@ -445,7 +449,8 @@ varyAtacSignal <- function(bamPath,
       atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
       fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
                                     effectStrength, 
-                                    logFCs=atacSubSolePeakDt$logFCs)
+                                    logFCs=atacSubSolePeakDt$logFCs,
+                                    maxReadPerPeak=maxReadPerPeak)
     }
   }
   else fragsSubset <- frags
@@ -524,6 +529,7 @@ simAtacData <- function(bamPaths,
                         simFLD=TRUE,
                         simEffectStrength=TRUE,
                         varyAtacPeaks=TRUE,
+                        maxReadPerPeak=300,
                         annotationStyle="NCBI",
                         colNamesChIPPeaks=c("chr","start", "end", 
                                             "name", "score", "strand",
@@ -598,6 +604,7 @@ simAtacData <- function(bamPaths,
                               simFLD=simFLD, 
                               simEffectStrength=simEffectStrength,
                               varyAtacPeaks=varyAtacPeaks,
+                              maxReadPerPeak=maxReadPerPeak,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -632,7 +639,6 @@ simAtacData <- function(bamPaths,
                               chIPlogFCs=chIPlogFCs*-1,
                               atacLogFCs=atacLogFCs,
                               effectStrength=effectStrength,
-                              simEffectStrength=simEffectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup2$fracSub[1],
                               prob=c(paramsGroup2$prob_nf[1], 
@@ -644,7 +650,9 @@ simAtacData <- function(bamPaths,
                               minOverlap=minOverlap,
                               simGCBias=simGCBias,
                               simFLD=simFLD,
+                              simEffectStrength=simEffectStrength,
                               varyAtacPeaks=varyAtacPeaks,
+                              maxReadPerPeak=maxReadPerPeak,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
