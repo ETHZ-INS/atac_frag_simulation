@@ -392,6 +392,7 @@ varyAtacSignal <- function(bamPath,
                            maxGC=1,
                            simGCBias=TRUE,
                            simFLD=TRUE,
+                           simEffectStrength=TRUE,
                            varyAtacPeaks=TRUE,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
@@ -427,24 +428,27 @@ varyAtacSignal <- function(bamPath,
                                  estimateProb=estimateProb)
   }
   
-  # Vary Effect size of ChIP-peaks
-  fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs)
-  
-  # like this correspondance to logFCs is lost
-  print(dim(fragsSubset))
-  if(varyAtacPeaks)
+  if(simEffectStrength)
   {
-    atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
-    atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
+    # Vary Effect size of ChIP-peaks
+    fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs)
+  
+  
+    # like this correspondance to logFCs is lost
+    if(varyAtacPeaks)
+    {
+      atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
+      atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
     
-    atacSubSolePeakDt <-  atacSolePeakDt[sample(1:nrow(atacSolePeakDt), min(nrow(atacSolePeakDt), 
+      atacSubSolePeakDt <-  atacSolePeakDt[sample(1:nrow(atacSolePeakDt), min(nrow(atacSolePeakDt), 
                                                     length(peaks))),]
-    atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
-    fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
-                                  effectStrength, 
-                                  logFCs=atacSubSolePeakDt$logFCs)
-    print(dim(fragsSubset))
+      atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
+      fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
+                                    effectStrength, 
+                                    logFCs=atacSubSolePeakDt$logFCs)
+    }
   }
+  else fragsSubset <- frags
   
   # Get indices of read pairs to keep
   readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
@@ -518,6 +522,7 @@ simAtacData <- function(bamPaths,
                         maxGC=1,
                         simGCBias=TRUE,
                         simFLD=TRUE,
+                        simEffectStrength=TRUE,
                         varyAtacPeaks=TRUE,
                         annotationStyle="NCBI",
                         colNamesChIPPeaks=c("chr","start", "end", 
@@ -531,6 +536,7 @@ simAtacData <- function(bamPaths,
                         lfcCol="lfc",
                         genome=BSgenome.Hsapiens.UCSC.hg38){
   
+  if(simEffectStrength){
   # import peaks 
   chIPPeaks <- .importPeaks(chIPPeakDir, which, 
                             annotationStyle, 
@@ -548,7 +554,14 @@ simAtacData <- function(bamPaths,
   # estimate ATAC-peak logFCs
   setnames(lfcDist, enrColChIPName, enrColAtacName)
   atacPeakDt <- .estLfc(atacPeaks, lfcDist,  enrCol=enrColAtacName, lfcCol=lfcCol)
-  atacLogFCs <- atacPeakDt$lfc
+  atacLogFCs <- atacPeakDt$lfc}
+  else{
+    chIPPeaks=NULL
+    chIPlogFCs=NULL
+    
+    atacPeaks=NULL
+    atacLogFCs=NULL
+  }
   
   # Positive samples
   posSamples <- bamPaths[which(design==1)]
@@ -583,6 +596,7 @@ simAtacData <- function(bamPaths,
                               minOverlap=minOverlap,
                               simGCBias=simGCBias,
                               simFLD=simFLD, 
+                              simEffectStrength=simEffectStrength,
                               varyAtacPeaks=varyAtacPeaks,
                               minGC=minGC,
                               maxGC=maxGC,
@@ -618,6 +632,7 @@ simAtacData <- function(bamPaths,
                               chIPlogFCs=chIPlogFCs*-1,
                               atacLogFCs=atacLogFCs,
                               effectStrength=effectStrength,
+                              simEffectStrength=simEffectStrength,
                               nFragTypes=nFragTypes,
                               fracSub=paramsGroup2$fracSub[1],
                               prob=c(paramsGroup2$prob_nf[1], 
