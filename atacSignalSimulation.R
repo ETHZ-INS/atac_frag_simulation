@@ -320,6 +320,11 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   if(effectStrength>0)
   {
     fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)*effectStrength), by=c("id")]
+    peakyDt <- unique(fragsInPeaks, by=c("id"))
+    print("all peaks")
+    print(nrow(peakyDt))
+    print("peaks with more than 300")
+    print(nrow(subset(peakyDt, nFrags>300)))
   }
   else
   {
@@ -433,6 +438,7 @@ varyAtacSignal <- function(bamPath,
   
   if(simEffectStrength)
   {
+    print("vary chIP peaks")
     # Vary Effect size of ChIP-peaks
     fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs,
                                   maxReadPerPeak=maxReadPerPeak)
@@ -441,6 +447,7 @@ varyAtacSignal <- function(bamPath,
     # like this correspondance to logFCs is lost
     if(varyAtacPeaks)
     {
+      print("Vary atac peaks")
       atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
       atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
     
@@ -540,8 +547,9 @@ simAtacData <- function(bamPaths,
                         enrColChIPName="signalValue",
                         enrColAtacName="signalValue",
                         lfcCol="lfc",
+                        seed=42,
                         genome=BSgenome.Hsapiens.UCSC.hg38){
-  
+  set.seed(seed)
   if(simEffectStrength){
   # import peaks 
   chIPPeaks <- .importPeaks(chIPPeakDir, which, 
