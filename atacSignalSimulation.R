@@ -463,12 +463,12 @@ varyAtacSignal <- function(bamPath,
   else fragsSubset <- frags
   
   # Get indices of read pairs to keep
-  readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
-                              start=pmin(start(GenomicAlignments::first(readPairs)), 
-                                         start(GenomicAlignments::second(readPairs))), 
-                              end=pmax(end(GenomicAlignments::first(readPairs)), 
-                                       end(GenomicAlignments::second(readPairs))),
-                              id=1:length(readPairs))
+  # readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
+  #                             start=pmin(start(GenomicAlignments::first(readPairs)), 
+  #                                        start(GenomicAlignments::second(readPairs))), 
+  #                             end=pmax(end(GenomicAlignments::first(readPairs)), 
+  #                                      end(GenomicAlignments::second(readPairs))),
+  #                             id=1:length(readPairs))
   
   fragsSubset[,frag_id:=1:nrow(fragsSubset)]
   # readPairsFragSub <- merge(fragsSubset,
