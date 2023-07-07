@@ -568,7 +568,8 @@ simAtacData <- function(bamPaths,
   # estimate ATAC-peak logFCs
   setnames(lfcDist, enrColChIPName, enrColAtacName)
   atacPeakDt <- .estLfc(atacPeaks, lfcDist,  enrCol=enrColAtacName, lfcCol=lfcCol)
-  atacLogFCs <- atacPeakDt$lfc}
+  atacLogFCs <- atacPeakDt$lfc
+  }
   else{
     chIPPeaks=NULL
     chIPlogFCs=NULL
