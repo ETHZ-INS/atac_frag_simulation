@@ -550,6 +550,8 @@ simAtacData <- function(bamPaths,
                         seed=42,
                         genome=BSgenome.Hsapiens.UCSC.hg38){
   set.seed(seed)
+  seqlevelsStyle(which) <- annotationStyle
+  
   if(simEffectStrength){
   # import peaks 
   chIPPeaks <- .importPeaks(chIPPeakDir, which, 
