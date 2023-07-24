@@ -6,14 +6,15 @@ library(BSgenome.Hsapiens.UCSC.hg38)
 library(MASS)
 library(mclust)
 library(Repitools)
+library(data.table)
 
-setDTthreads(2)
+data.table::setDTthreads(2)
 
 first <- data.table::first
 
-sampleSwitch <- function(total, size){ setDTthreads(2)
+sampleSwitch <- function(total, size){ data.table::setDTthreads(2)
   if(total >= size)
-  {setDTthreads(2)
+  {
     s <- sample(total, size=size, replace=FALSE)
   }
   else
@@ -24,28 +25,51 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   return(s)
 }
 
-.importFrags <- function(bamPath, which=NULL, annotationStyle="NCBI")
-{setDTthreads(2)
+.importFrags <- function(bamPath, which=NULL, fracSub=1, annotationStyle="NCBI")
+{data.table::setDTthreads(2)
   if(is.null(which))
   {
     which <- GRanges(Rle(1:22), 
                      IRanges(start=rep(1,22), width=536870912))
   }
   
-  param <- ScanBamParam(what=c('pos', 'qwidth', 'isize'),
-                        which=which, 
-                        flag=scanBamFlag(isUnmappedQuery=FALSE))
+  if(grepl(".bam", bamPath))
+  {
+    param <- ScanBamParam(what=c('pos', 'qwidth', 'isize'),
+                          which=which, 
+                          flag=scanBamFlag(isUnmappedQuery=FALSE))
   
-  readPairs <- readGAlignmentPairs(bamPath, param=param)
+   readPairs <- readGAlignmentPairs(bamPath, param=param)
   
-  # get fragment coordinates from read pairs
-  frags <- GRanges(seqnames(GenomicAlignments::first(readPairs)), 
-                   IRanges(start=pmin(GenomicAlignments::start(GenomicAlignments::first(readPairs)), 
-                                      GenomicAlignments::start(GenomicAlignments::second(readPairs))), 
-                           end=pmax(GenomicAlignments::end(GenomicAlignments::first(readPairs)), 
-                                    GenomicAlignments::end(second(readPairs)))))
+   # get fragment coordinates from read pairs
+   frags <- GRanges(seqnames(GenomicAlignments::first(readPairs)), 
+                    IRanges(start=pmin(GenomicAlignments::start(GenomicAlignments::first(readPairs)), 
+                                       GenomicAlignments::start(GenomicAlignments::second(readPairs))), 
+                            end=pmax(GenomicAlignments::end(GenomicAlignments::first(readPairs)), 
+                                     GenomicAlignments::end(GenomicAlignments::second(readPairs)))))
   
-  frags <- granges(frags, use.mcols=TRUE)
+   frags <- granges(frags, use.mcols=TRUE)
+  }
+  else if(grepl(".bed", bamPath)){
+    frags <- fread(bamPath)
+    frags <- makeGRangesFromDataFrame(as.data.frame(frags)) 
+    frags <- subsetByOverlaps(frags, which)
+    readPairs <- NULL
+  }
+  else if(grepl(".rds", bamPath)){
+    frags <- readRDS(bamPath)
+    frags <- subsetByOverlaps(frags, which)
+    readPairs <- NULL
+  }
+  
+  if(fracSub<1)
+  {
+    n <- length(frags)
+    nSub <- ceiling(n*fracSub)
+    
+    frags <- frags[sample(1:n, nSub, replace=FALSE)]
+    readPairs <- readPairs[sample(1:n, nSub, replace=FALSE)]
+  }
   
   # change annotation style
   seqlevelsStyle(frags) <- annotationStyle
@@ -62,7 +86,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                                     "name", "score", "strand",
                                     "signalValue", "pValue", "qValue", "peak"))
 { 
-  setDTthreads(2)
+  data.table::setDTthreads(2)
   peaks <- fread(peaksDir, col.names=colNames)
 
   peaks <- makeGRangesFromDataFrame(peaks, keep.extra.columns=TRUE)
@@ -80,7 +104,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                     nBins=100, 
                     enrCol="enr",
                     lfcCol="lfc")
-{setDTthreads(2)
+{data.table::setDTthreads(2)
   enrPeakDt <- as.data.table(enrichment)
   lfcDistDt <- as.data.table(lfcDist)
   lfcDistDt <- copy(lfcDistDt)
@@ -135,7 +159,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                        frac=0.2, 
                        minOverlap=1, 
                        annotationStyle="NCBI")
-{setDTthreads(2)
+{data.table::setDTthreads(2)
   # Subset to "primary" signal peaks
   fragsPeaks <- suppressWarnings(subsetByOverlaps(frags, peaks, minoverlap=minOverlap))
   fragsOut <- suppressWarnings(subsetByOverlaps(frags, peaks, invert = TRUE))
@@ -156,7 +180,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                         maxGC=1,
                         annotationStyle="NCBI",
                         genome=BSgenome.Hsapiens.UCSC.hg38)
-{setDTthreads(2)
+{data.table::setDTthreads(2)
   # Import GC bias table (output deeptools)
   gcBiasTable <- fread(biasFileDir, select=1:3,
                        col.names=c("observed_read_count", 
@@ -212,7 +236,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                           referenceData=NULL,
                           prob=c(0.5, 0.4, 0.08, 0.02),
                           estimateProb=FALSE)
-{setDTthreads(2)
+{data.table::setDTthreads(2)
   if(fitGMM)
   {
     # Estimate fragment length distributions
@@ -246,7 +270,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   nSample <- round(nrow(fragsTable)*frac)
   nFragsType <- round(nSample*prob)
   
-  fragsSubTable <- lapply(1:nClust, function(i){setDTthreads(2)
+  fragsSubTable <- lapply(1:nClust, function(i){data.table::setDTthreads(2)
     sampledFrags <- fragsTable[cluster==i, ][sampleSwitch(.N, nFragsType[i]),]
   })
   
@@ -284,7 +308,7 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
                            noiseLevel=0.1,
                            maxReadPerPeak=300
                            #mode=c("scale", "plain")
-){setDTthreads(2)
+){data.table::setDTthreads(2)
   
   #mode <- mode[1]
   
@@ -319,30 +343,25 @@ sampleSwitch <- function(total, size){ setDTthreads(2)
   fragsInPeaks[,fc:=2^abs(logFC)]
   if(effectStrength>0)
   {
-    fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)*effectStrength), by=c("id")]
-    peakyDt <- unique(fragsInPeaks, by=c("id"))
-    print("all peaks")
-    print(nrow(peakyDt))
-    print("peaks with more than 300")
-    print(nrow(subset(peakyDt, nFrags>300)))
+    fragsInPeaks[, nFrags:=min(.N, floor(.N*data.table::first(fc)*effectStrength)), by=c("id")]
   }
   else
   {
-    fragsInPeaks[, nFrags:=.N*round(data.table::first(fc)), by=c("id")]
+    fragsInPeaks[, nFrags:=.N, by=c("id")]
   }
   
   # Only sample from positive logFcs run for multiple samples
-  if(nrow(fragsInPeaks[logFC>0,])>0)
+  if(nrow(fragsInPeaks[logFC>0,])>0 & effectStrength>0)
   {
     fragsInPeaksSub <- fragsInPeaks[logFC>0,][,.SD[sampleSwitch(.N, min(maxReadPerPeak,
                                                                         data.table::first(nFrags)))], by=id]
+    fragsInPeaksSub <- rbind(fragsInPeaksSub, fragsInPeaks[logFC<=0,])
   }
   else
   {
-    fragsInPeaksSub <- fragsInPeaks[logFC>0,]
+    fragsInPeaksSub <- fragsInPeaks
   }
   
-  fragsInPeaksSub <- rbind(fragsInPeaksSub, fragsInPeaks[logFC<=0,])
   fragsInPeaksSub <- fragsInPeaksSub[,c("seqnames", "i.start", "i.end"), with=FALSE]
   colnames(fragsInPeaksSub) <- c("seqnames", "start", "end")
   
@@ -405,12 +424,17 @@ varyAtacSignal <- function(bamPath,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
 {
-  setDTthreads(2)
+  data.table::setDTthreads(2)
   
   # Import fragments and peaks
-  bamData <- .importFrags(bamPath, which, annotationStyle)
+  ptm <- proc.time()
+  bamData <- .importFrags(bamPath, which, fracSub, annotationStyle)
+  print(proc.time()-ptm)
+  print("time passed for reading")
   frags <- bamData$fragments
   readPairs <- bamData$readPairs
+  print("number of fragments")
+  print(length(frags))
 
   # Vary GC Bias
   if(simGCBias)
@@ -420,8 +444,17 @@ varyAtacSignal <- function(bamPath,
       stop("Bias-file directory has to be provided if gc bias should be simulated (simGCBias=TRUE)")  
     }
     
-    frags <- .varyGCBias(frags, biasFileDir, fracSub,
-                                minGC, maxGC, annotationStyle, genome)
+    if(!is.na(biasFileDir))
+    {
+      print("Bias file is specified")
+      frags <- .varyGCBias(frags, biasFileDir, fracSub,
+                           minGC, maxGC, annotationStyle, genome)
+    }
+    else
+    {
+      print("Bias file is not specified, observed bias is used")
+      frags <- as.data.table(frags) 
+    }
   }
   else
   {
@@ -530,6 +563,7 @@ simAtacData <- function(bamPaths,
                         effectStrength=2,
                         nFragTypes=4,
                         minOverlap=1,
+                        fracSub=1,
                         minGC=0,
                         maxGC=1,
                         simGCBias=TRUE,
@@ -549,8 +583,10 @@ simAtacData <- function(bamPaths,
                         lfcCol="lfc",
                         seed=42,
                         genome=BSgenome.Hsapiens.UCSC.hg38){
+  
   set.seed(seed)
   seqlevelsStyle(which) <- annotationStyle
+  #RhpcBLASctl::omp_set_num_threads(2L)
   
   if(simEffectStrength){
   # import peaks 
@@ -583,17 +619,18 @@ simAtacData <- function(bamPaths,
   # Positive samples
   posSamples <- bamPaths[which(design==1)]
   posSampleNames <- sampleNames[which(design==1)]
-  
+
   if(simGCBias)
   {
-    posGcBiases <- posGcBiases[which(design==-1)]
+    posGcBiases <- gcBiases[which(design==-1)]
   }
   else
   {posGcBiases <- NULL}
   
   
-  simSamplesPos <- lapply(1:length(posSamples), function(i){setDTthreads(2)
+  simSamplesPos <- lapply(1:length(posSamples), function(i){data.table::setDTthreads(2)
     
+    ptm <- proc.time()
     simData <- varyAtacSignal(bamPath=posSamples[i], 
                               peaks=chIPPeaks,
                               atacPeaks=atacPeaks,
@@ -603,7 +640,7 @@ simAtacData <- function(bamPaths,
                               atacLogFCs=atacLogFCs*-1,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
-                              fracSub=paramsGroup1$fracSub[1],
+                              fracSub=fracSub,
                               prob=c(paramsGroup1$prob_nf[1], 
                                      paramsGroup1$prob_mono[1], 
                                      paramsGroup1$prob_di[1], 
@@ -623,6 +660,8 @@ simAtacData <- function(bamPaths,
     simData$sample <- posSampleNames[i]
     simData$group <- paramsGroup1$name[1]
     simData <- as.data.table(simData)
+    print(proc.time()-ptm)
+    print("processed sample")
     
     return(simData)
   })
@@ -640,7 +679,7 @@ simAtacData <- function(bamPaths,
   else
   {negGcBiases <- NULL}
   
-  simSamplesNeg <- lapply(1:length(negSamples), function(i){setDTthreads(2)
+  simSamplesNeg <- lapply(1:length(negSamples), function(i){data.table::setDTthreads(2)
     
     simData <- varyAtacSignal(bamPath=negSamples[i], 
                               peaks=chIPPeaks,
@@ -651,7 +690,7 @@ simAtacData <- function(bamPaths,
                               atacLogFCs=atacLogFCs,
                               effectStrength=effectStrength,
                               nFragTypes=nFragTypes,
-                              fracSub=paramsGroup2$fracSub[1],
+                              fracSub=fracSub,
                               prob=c(paramsGroup2$prob_nf[1], 
                                      paramsGroup2$prob_mono[1], 
                                      paramsGroup2$prob_di[1], 
