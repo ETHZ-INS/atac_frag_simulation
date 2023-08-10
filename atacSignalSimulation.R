@@ -196,6 +196,7 @@ sampleSwitch <- function(total, size){ data.table::setDTthreads(2)
   gcBiasTableSub[nrow(gcBiasTableSub),]$gc_bin_end <- maxGC
   
   # get gc content per frag
+  frags <- makeGRangesFromDataFrame(as.data.frame(frags))
   seqlevelsStyle(frags) <- "UCSC"
   frags$GC_content <- suppressWarnings(Repitools::gcContentCalc(frags, 
                                                                 organism=genome))
@@ -203,6 +204,8 @@ sampleSwitch <- function(total, size){ data.table::setDTthreads(2)
   
   # annotate each frag with gc bin
   fragsTable <- as.data.table(frags) # convert to data.table for simplicity
+  print("dim before upsampling")
+  print(dim(fragsTable))
   fragsTable$min_GC_content <- fragsTable$GC_content
   fragsTable$max_GC_content <- fragsTable$GC_content  
   
@@ -226,6 +229,8 @@ sampleSwitch <- function(total, size){ data.table::setDTthreads(2)
   # alternative with no up-sampling : sample(.N, min(unique(n2Sample), .N))
   fragsSubTable <- fragsTable[,.SD[sampleSwitch(.N, unique(n2Sample))], by=gc_bin]
   
+  print("after gc sampling")
+  print(dim(fragsSubTable))
   return(fragsSubTable)
 }
 
@@ -343,7 +348,7 @@ sampleSwitch <- function(total, size){ data.table::setDTthreads(2)
   fragsInPeaks[,fc:=2^abs(logFC)]
   if(effectStrength>0)
   {
-    fragsInPeaks[, nFrags:=min(.N, floor(.N*data.table::first(fc)*effectStrength)), by=c("id")]
+    fragsInPeaks[, nFrags:=max(.N, floor(.N*data.table::first(fc)*effectStrength)), by=c("id")]
   }
   else
   {
@@ -421,6 +426,7 @@ varyAtacSignal <- function(bamPath,
                            simEffectStrength=TRUE,
                            varyAtacPeaks=TRUE,
                            maxReadPerPeak=300,
+                           matchCounts=FALSE,
                            annotationStyle="NCBI",
                            genome=BSgenome.Hsapiens.UCSC.hg38)
 {
@@ -435,7 +441,56 @@ varyAtacSignal <- function(bamPath,
   readPairs <- bamData$readPairs
   print("number of fragments")
   print(length(frags))
-
+  
+  fragRanges <- frags
+  frags <- as.data.table(frags) 
+  
+  if(simEffectStrength)
+  {
+    print("vary chIP peaks")
+    # Vary Effect size of ChIP-peaks
+    fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs,
+                                  maxReadPerPeak=maxReadPerPeak)
+    
+    
+    # like this correspondance to logFCs is lost
+    if(varyAtacPeaks)
+    {
+      print("Vary atac peaks")
+      atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
+      atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
+      
+      if(matchCounts)
+      {
+        atacSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSolePeakDt))
+        atacCounts <- countOverlaps(atacSolePeakRanges, fragRanges)
+        chIPCounts <- countOverlaps(peaks, fragRanges)
+        iqrChIP <- iqr(chIPCounts)
+        medianChIP <- median(chIPCounts)
+      
+        idAtacPeaks <- which(atacCounts<=(medianChIP+iqrChIP) & (atacCounts>=(medianChIP-iqrChIP)))
+        atacSolePeakDt <- atacSolePeakDt[idAtacPeaks, ]
+      
+      # match width
+      #atacSolePeakDt[,med:=floor((end-start)/2+start)]
+      #medWidth <- median(width(peaks))
+      #atacSolePeakDt[,start:=med-floor(medWidth/2)]
+      #atacSolePeakDt[,end:=med+floor(medWidth/2)]
+      }
+      
+      nPeaksOverlaps <- length(peaks[overlapsAny(peaks, atacPeaks)])
+      atacSubSolePeakDt <-  atacSolePeakDt[sample(1:nrow(atacSolePeakDt), 
+                                                  min(nrow(atacSolePeakDt), 
+                                                      nPeaksOverlaps)),]
+      atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
+      fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
+                                    effectStrength, 
+                                    logFCs=atacSubSolePeakDt$logFCs,
+                                    maxReadPerPeak=maxReadPerPeak)
+    }
+  }
+  else fragsSubset <- frags
+  
   # Vary GC Bias
   if(simGCBias)
   {
@@ -447,53 +502,27 @@ varyAtacSignal <- function(bamPath,
     if(!is.na(biasFileDir))
     {
       print("Bias file is specified")
-      frags <- .varyGCBias(frags, biasFileDir, fracSub,
+      fragsSubset <- .varyGCBias(fragsSubset, biasFileDir, fracSub,
                            minGC, maxGC, annotationStyle, genome)
     }
     else
     {
       print("Bias file is not specified, observed bias is used")
-      frags <- as.data.table(frags) 
+      fragsSubset <- as.data.table(fragsSubset) 
     }
   }
   else
   {
-    frags <- as.data.table(frags) 
+    fragsSubset <- as.data.table(fragsSubset) 
   }
     
   if(simFLD)
   {
     # Vary Frag Dist
-    frags <- .varyFragDist(frags, fracSub, nClust=nFragTypes,
+    fragsSubset <- .varyFragDist(fragsSubset, fracSub, nClust=nFragTypes,
                                  fitGMM=fitGMM, prob=prob, 
                                  estimateProb=estimateProb)
   }
-  
-  if(simEffectStrength)
-  {
-    print("vary chIP peaks")
-    # Vary Effect size of ChIP-peaks
-    fragsSubset <- .varEffectSize(frags, peaks, effectStrength, logFCs=chIPlogFCs,
-                                  maxReadPerPeak=maxReadPerPeak)
-  
-  
-    # like this correspondance to logFCs is lost
-    if(varyAtacPeaks)
-    {
-      print("Vary atac peaks")
-      atacPeakDt <- cbind(as.data.table(atacPeaks), data.table(logFCs=atacLogFCs))
-      atacSolePeakDt <- atacPeakDt[!overlapsAny(atacPeaks, peaks),]
-    
-      atacSubSolePeakDt <-  atacSolePeakDt[sample(1:nrow(atacSolePeakDt), min(nrow(atacSolePeakDt), 
-                                                    length(peaks))),]
-      atacSubSolePeakRanges <- makeGRangesFromDataFrame(as.data.frame(atacSubSolePeakDt))
-      fragsSubset <- .varEffectSize(fragsSubset, atacSubSolePeakRanges, 
-                                    effectStrength, 
-                                    logFCs=atacSubSolePeakDt$logFCs,
-                                    maxReadPerPeak=maxReadPerPeak)
-    }
-  }
-  else fragsSubset <- frags
   
   # Get indices of read pairs to keep
   # readPairsFrag <- data.table(seqnames=runValue(seqnames(GenomicAlignments::first(readPairs))), 
@@ -571,6 +600,7 @@ simAtacData <- function(bamPaths,
                         simEffectStrength=TRUE,
                         varyAtacPeaks=TRUE,
                         maxReadPerPeak=300,
+                        matchCounts=FALSE,
                         annotationStyle="NCBI",
                         colNamesChIPPeaks=c("chr","start", "end", 
                                             "name", "score", "strand",
@@ -622,7 +652,7 @@ simAtacData <- function(bamPaths,
 
   if(simGCBias)
   {
-    posGcBiases <- gcBiases[which(design==-1)]
+    posGcBiases <- gcBiases[which(design==1)]
   }
   else
   {posGcBiases <- NULL}
@@ -653,6 +683,7 @@ simAtacData <- function(bamPaths,
                               simEffectStrength=simEffectStrength,
                               varyAtacPeaks=varyAtacPeaks,
                               maxReadPerPeak=maxReadPerPeak,
+                              matchCounts=matchCounts,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
@@ -703,6 +734,7 @@ simAtacData <- function(bamPaths,
                               simEffectStrength=simEffectStrength,
                               varyAtacPeaks=varyAtacPeaks,
                               maxReadPerPeak=maxReadPerPeak,
+                              matchCounts=matchCounts,
                               minGC=minGC,
                               maxGC=maxGC,
                               annotationStyle=annotationStyle,
