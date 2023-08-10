@@ -1,0 +1,113 @@
+---
+title: "ES1"
+author: "Felix Gerbaldo"
+date: "19 6 2023"
+output: html_document
+params:
+  tfName:
+    label: "tfName"
+    value: MAZ
+    input: text
+  atacBenchScripts1:
+    label: "atacBenchScripts1"
+    value: ATACr.R
+    input: text
+  atacBenchScripts2:
+    label: "atacBenchScripts2"
+    value: BenchATAC.R
+    input: text
+  pmoiDir:
+    label: "pmoiDir"
+    value: pmoi.rds
+    input: text
+  atacPeakDir:
+    label: "atacPeakDir"
+    value: ./atac_peaks
+    input: text
+  design:
+    label: "design"
+    value: 1,1,1,-1,-1,-1
+    input: text
+  simSampleDir:
+    label: "simSampleDir"
+    value: ./out
+    input: text
+  simSampleNames:
+    label: "simSampleNames"
+    value: treat1,treat2,treat3,ctrl1,ctrl2,ctrl3
+    input: text
+---
+
+```{r, error=TRUE}
+library(BiocParallel)
+source(params$atacBenchScripts1)
+register(MultiCoreParam(workers=4))
+```
+
+```{r, error=TRUE}
+print(getwd())
+dir.create(file.path(params$simSampleDir, "new_results"))
+dir.create(file.path(params$simSampleDir, "new_results", "others"))
+dir.create(file.path(params$simSampleDir, "new_results"))
+dir.create(file.path(params$simSampleDir, "new_results", "raw"))
+dir.create(file.path(params$simSampleDir, "new_results"))
+dir.create(file.path(params$simSampleDir, "new_results", "with_pvalues"))
+dir.create(file.path(params$simSampleDir, "BMresults"))
+```
+
+```{r, error=TRUE}
+methods=c("chromVAR", 
+          "monaLisa",
+           "msVIPER", 
+           "ulm", 
+           "regreg")
+design <- params$design
+pmoi <- readRDS(params$pmoiDir)
+genome <- BSgenome.Hsapiens.UCSC.hg38
+peakpath <- params$atacPeakDir
+
+readlist <- file.path(params$simSampleDir, params$simSampleNames)
+readlist <- paste0(readlist, ".bed")
+readtype = "bed"
+spec = "Hsapiens"
+seqStyle="UCSC"
+```
+
+```{r, error=TRUE}
+print(readlist)
+setwd(params$simSampleDir)
+ATACr(methods = methods, 
+      design = design, 
+      genome = genome, 
+      peakpath = peakpath, 
+      pmoi = pmoi, 
+      spec = spec, 
+      readlist = readlist, 
+      readtype = readtype, 
+      seqStyle = seqStyle,
+      aggregation = TRUE)
+```
+
+
+```{r eval=TRUE, error=TRUE}
+setwd(params$simSampleDir)
+summary <- readRDS("./new_results/summary.rds")
+```
+
+```{r eval=TRUE, error=TRUE}
+source(params$atacBenchScripts2)
+```
+
+
+```{r eval=TRUE, error=TRUE}
+setwd(params$simSampleDir)
+rawpaths <- list.files(path = "./new_results/raw/", recursive = TRUE, full.names = TRUE)
+respaths <- list.files(path = "./new_results/with_pvalues/", recursive = TRUE, full.names = TRUE)
+rank_only = NULL
+TrueTF <- params$tfName
+motifpath <- "./new_results/others/motifs.rds"
+species = "9606"
+
+ES1Bench <- BenchATAC(rawpaths, respaths, rank_only, TrueTF, motifpath, species)
+saveRDS(ES1Bench, "./BMresults/bm_res.rds")
+```

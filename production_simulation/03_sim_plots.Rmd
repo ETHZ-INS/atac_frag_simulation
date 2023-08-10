@@ -1,0 +1,1010 @@
+---
+title: "Plotting Ranks"
+output: html_document
+date: '2023-07-14'
+---
+
+## Setup
+
+```{r setup}
+suppressPackageStartupMessages({
+library(data.table)
+library(ggplot2)
+library(GenomicRanges)
+library(ggpubr)
+library(ggthemes)
+library(viridis)
+library(matrixStats)})
+```
+
+Paths
+```{r, path definition}
+haploParaPath <- "./lfc_dist/happloinsufficiency.rds"
+actParaPath <- "./lfc_dist/activation.rds"
+
+esSimDir <- gcVariedSimDir <- "./out_final"
+gcNonVariedSimDir <- esPosSimDir <- "./out_test"
+resPath <- "BMresults/bm_res.rds"
+atacPeakPath <- "./atac_peaks/filtered_mergedSamples_atac_peaks.bed_peaks.narrowPeak"
+chipPeaksDir <- "./tf_peaks"
+motifMatchesPath <- "./atac_peaks/pmoi.rds"
+motifsPath <- "/mnt/plger/fgerbaldo/DTFAIB/KLF1/ATACr_results/others/motifs.rds"
+```
+
+Coloring palette heatmaps
+````{r}
+vFunc <- function(x) viridis(8, direction=-1, begin=0, end=1)
+````
+
+Helper functions
+```{r, get motif function}
+  library(MotifDb)
+  library(motifmatchr)
+  library(memes)
+  library(Matrix)
+  library(GenomicRanges)
+  library(BSgenome.Hsapiens.UCSC.hg38)
+  library(BSgenome.Mmusculus.UCSC.mm10)
+          
+getNonRedundantMotifs <- function(format=c("PFMatrix","universal","PWMatrix"),
+                                  species=c("Hsapiens","Mmusculus")){
+  species <- match.arg(species)
+  motifs <- MotifDb::query(MotifDb::MotifDb, c(species,"HOCOMOCO"))
+  pat <- paste0("^",species,"-HOCOMOCOv1[0-1]-|_HUMAN.+|_MOUSE.+|core-[A-D]-|secondary-[A-D]-")
+  modf <- data.frame(row.names=names(motifs),
+                     TF=gsub(pat,"",names(motifs)),
+                     grade=gsub(".+\\.","",names(motifs)))
+  modf <- modf[order(modf$TF,-as.numeric(grepl("HOCOMOCOv11",row.names(modf))),modf$grade),]
+  modf <- modf[!duplicated(modf$TF),]
+  motifs <- motifs[row.names(modf)]
+  switch(match.arg(format),
+         universal=setNames(universalmotif::convert_motifs(motifs), modf$TF),
+         PFMatrix=do.call(TFBSTools::PFMatrixList, setNames(
+           universalmotif::convert_motifs(motifs, class="TFBSTools-PFMatrix"),
+           modf$TF)),
+         PWMatrix=do.call(TFBSTools::PWMatrixList, 
+                          setNames(universalmotif::convert_motifs(motifs, 
+                                                                  class="TFBSTools-PWMatrix"), modf$TF))
+  )
+}
+
+```
+
+## Log FC distribution
+
+```{r, logFC distributions}
+haplo <- readRDS(haploParaPath)
+haplo$paradigm <- "Haploinsufficiency"
+act <- readRDS(actParaPath)
+act$paradigm <- "Activation"
+
+lfcDist <- rbind(act, haplo)
+lfcDist <- subset(lfcDist, !is.na(enr) & !is.na(lfc))
+lfcPlot <- ggplot(lfcDist, aes(x=lfc, 
+                    scales="free", 
+                    color=paradigm))+
+geom_density(lwd=1.5)+
+#facet_grid(cols=vars(paradigm), scales="free")+
+xlab("Log fold changes")+
+scale_color_manual(values=c("#000000", "#E69F00"))+
+guides(color=guide_legend(title=""))+
+xlim(c(-4.5,4.5))+
+theme_bw()
+lfcPlot
+
+ggsave("lfcDist.png", lfcPlot, units="cm", width=12, height=8)
+```
+
+## Effect Strength
+
+Import Results
+```{r ranks}
+simSettings <- list.files(esSimDir, full.names=FALSE)
+
+fullResPaths <- file.path(esSimDir, simSettings, resPath)
+fullResPaths <- fullResPaths[which(grepl("no_gc", fullResPaths))]
+allRanks <- lapply(fullResPaths, function(path){
+  
+  if(file.exists(path))
+  {
+    name <- unlist(tstrsplit(path, split="/", keep=3))
+    res <- readRDS(path)
+    ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
+    methodNames <- names(ranks)
+    ranks <- do.call("rbind", ranks)
+    ranks$method <- methodNames
+    ranks$setting <- name
+
+    ranks[,c("tf", "paradigm", "effect_strength"):=tstrsplit(setting, split="_", keep=c(1,2,7))]
+    ranks
+  }
+})
+allRanks <- rbindlist(allRanks)
+```
+
+Ranks plot
+```{r}
+allRanks <- subset(allRanks, name!="SMARCA5")
+allRanks$rank <- as.numeric(allRanks$rank)
+levelsEffect <- as.numeric(unique(allRanks$effect_strength))
+levelsEffect <- levelsEffect[order(levelsEffect)]
+allRanks$effect_strength_f <- factor(allRanks$effect_strength, levels=levelsEffect)
+allRanks[,effect_strength_n:=as.numeric(allRanks$effect_strength)]
+
+ranksLines <- subset(allRanks, method %in% c("CV", "CVnorm", "fisher", "ML", "msVIPER", "simes", "npPvalAgg"))
+ranksLines[,isTop5:=fifelse(rank<=5, TRUE, FALSE)]
+ranksLines[,minTop5Es:=min(effect_strength_n), by=c("method", "name", "isTop5")]
+ranksLines[,isMinTop5Es:=fifelse(isTop5 & effect_strength_n==minTop5Es, TRUE, FALSE)]
+
+ggplot(ranksLines, aes(x=effect_strength_f, y=rank, color=method, group=method))+
+facet_grid(rows=vars(tf), cols=vars(paradigm))+
+scale_color_brewer(palette="Dark2")+
+scale_y_sqrt()+
+geom_point(aes(size =isTop5))+
+scale_size_manual(values=c(2,5))+
+xlab("Effect Strength")+
+geom_line(alpha=0.5)+
+theme_bw()
+
+allRanks[,method:=fifelse(method=="ulm", "ULM", method)]
+allRanks[,method:=fifelse(method=="CVnorm", "CVadj", method)]
+allRanks[,method:=fifelse(method=="regreg", "Regreg", method)]
+allRanks[,method:=fifelse(method=="fisher", "Fisher's", method)]
+allRanks[,method:=fifelse(method=="simes", "Simes'", method)]
+allRanks[,method:=fifelse(method=="stouffer", "Stouffer's", method)]
+allRanks[,method:=fifelse(method=="npPvalAgg", "npAgg", method)]
+allRanks[effect_strength>=1,mean_rank:=mean(rank), by=c("method")]
+allRanks[,min_rank:=min(rank), by=c("method")]
+setorder(allRanks, min_rank)
+allRanks$method <- factor(allRanks$method, levels=unique(allRanks$method), ordered=TRUE)
+allRanks[,is_aggregated:=fifelse(method %in% c("Simes'", "Stouffer's", "npAgg", "Fisher's"), "Aggregation", "Method")]
+allRanks$is_aggregated <- factor(allRanks$is_aggregated, levels=c("Method", "Aggregation"), ordered=TRUE)
+
+ggplot(allRanks, aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(rows=vars(tf), cols=vars(paradigm), scales="free")+
+geom_tile()+
+geom_text()+
+scale_fill_viridis_c(direction=-1)+
+theme_minimal()+
+ylab("Effect strength")+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+actRanks <- subset(allRanks, !is.na(effect_strength_f) & paradigm=="activation" & effect_strength %in% c("0", "0.25", "0.5", "1"))
+actRanks[,min_tf_rank:=min(rank), by=c("method", "tf")]
+actRanks[,min_mean_rank:=mean(min_tf_rank), by=c("method")]
+actRanks[effect_strength_n>0,mean_rank:=mean(rank), by=c("method")]
+setorder(actRanks, mean_rank)
+actRanks$method <- factor(actRanks$method, levels=unique(actRanks$method), ordered=TRUE)
+actRanks[,paradigm:="Activation"]
+actPlot <- ggplot(actRanks, aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(rows=vars(tf), cols=vars(paradigm, is_aggregated), scales="free")+
+geom_tile()+
+geom_text()+
+binned_scale(aesthetics = "fill",
+               scale_name = "stepsn", 
+               palette = vFunc,
+               breaks = c(1,5,10,25,50,100,200, 700),
+               limits=c(1,700),
+             show.limits = TRUE,
+               guide = "bins")+ 
+theme_minimal()+
+ylab("Effect strength")+
+#guides(fill=guide_legend(title="sqrt Rank"))+
+#guides(fill=guide_legend(title.position="top", label.position="bottom"))+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
+theme(axis.title.x=element_blank())
+
+happRanks <- subset(allRanks, !is.na(effect_strength_f) & paradigm=="happloinsufficiency")
+happRanks[,min_tf_rank:=min(rank), by=c("method", "tf")]
+happRanks[,min_mean_rank:=mean(min_tf_rank), by=c("method")]
+happRanks[effect_strength_n>0,mean_rank:=mean(rank), by=c("method")]
+setorder(happRanks, mean_rank)
+happRanks$method <- factor(happRanks$method, levels=unique(happRanks$method), ordered=TRUE)
+happRanks[,paradigm:="Haploinsufficiency"]
+happPlot <- ggplot(happRanks , aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(rows=vars(tf), cols=vars(paradigm, is_aggregated), scales="free")+
+geom_tile()+
+geom_text()+
+binned_scale(aesthetics = "fill",
+               scale_name = "stepsn", 
+               palette = vFunc,
+               breaks = c(1,5,10,25,50,100,200, 700),
+               limits=c(1,700),
+               show.limits = TRUE,
+               guide = "bins")+  
+theme_minimal()+
+ylab("Effect strength")+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
+theme(axis.title.x=element_blank(),
+      legend.position = 'top')
+
+esPlot <- ggarrange(actPlot, happPlot, ncol=2, common.legend=TRUE)
+esPlot
+ggsave("esPlot.png", esPlot, width=25, heigh=20, units="cm")
+noGCRanks <- allRanks
+```
+
+## GC-Bias plots
+
+Non-varied ATAC peak counts
+```{r, non varied atac peak counts}
+simSettings <- list.files(gcNonVariedSimDir, full.names=FALSE)
+
+fullResPaths <- file.path(gcNonVariedSimDir, simSettings, resPath)
+fullResPaths <- c(fullResPaths[which(grepl("nonvaried", fullResPaths))])
+allGCBiasRanks <- lapply(fullResPaths, function(path){
+  
+  if(file.exists(path) & !grepl("no_gc", path, fixed=TRUE))
+  {
+    name <- unlist(tstrsplit(path, split="/", keep=3))
+    res <- readRDS(path)
+    ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
+    methodNames <- names(ranks)
+    ranks <- do.call("rbind", ranks)
+    ranks$method <- methodNames
+    ranks$setting <- name
+    ranks[,c("tf", "paradigm", "gc", "strength", "effect_strength"):=tstrsplit(setting, split="_", keep=c(1,2, 4, 6, 9))]
+    ranks
+  }
+  else if(file.exists(path))
+  {
+    name <- unlist(tstrsplit(path, split="/", keep=3))
+    res <- readRDS(path)
+    ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
+    methodNames <- names(ranks)
+    ranks <- do.call("rbind", ranks)
+    ranks$method <- methodNames
+    ranks$setting <- name
+    ranks[,c("tf", "paradigm", "gc", "effect_strength"):=tstrsplit(setting, split="_", keep=c(1,2, 4,8))]
+    ranks$strength <- "none"
+    ranks
+  }
+})
+
+allGCBiasRanks <- rbindlist(allGCBiasRanks, use.names = TRUE)
+allRanks <- allGCBiasRanks
+
+allRanks$rank <- as.numeric(allRanks$rank)
+levelsEffect <- as.numeric(unique(allRanks$effect_strength))
+levelsEffect <- levelsEffect[order(levelsEffect)]
+allRanks$effect_strength_f <- factor(allRanks$effect_strength, levels=levelsEffect)
+allRanks[,effect_strength_n:=as.numeric(allRanks$effect_strength)]
+allRanks[, paradigm:=fifelse(paradigm=="happloinsufficiency", "happlo", paradigm)]
+
+ggplot(allRanks, aes(y=effect_strength_f, x=method, fill=sqrt(rank), label=rank))+
+facet_grid(cols=vars(paradigm), rows=vars(gc, strength), scales="free")+
+geom_tile()+
+geom_text()+
+scale_fill_viridis_c(direction=-1)+
+theme_minimal()+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ranksLines <- subset(allRanks, method %in% c("CV", "CVnorm", "fisher", "ML", "msVIPER", "npPvalAgg"))
+ranksLines[,isTop5:=fifelse(rank<=5, TRUE, FALSE)]
+ranksLines[,minTop5Es:=min(effect_strength_n), by=c("method", "name", "isTop5")]
+ranksLines[,isMinTop5Es:=fifelse(isTop5 & effect_strength_n==minTop5Es, TRUE, FALSE)]
+
+ggplot(subset(ranksLines, effect_strength_n!=0.2 & method %in% c("CV", "CVnorm", "ML", "msVIPER")), 
+       aes(x=effect_strength_f, y=rank, shape=strength, color=gc, group=interaction(gc, strength)))+
+facet_grid(rows=vars(paradigm), cols=vars(method), scales="free")+
+scale_color_colorblind()+ 
+scale_y_sqrt()+
+#ylim(c(0,100))+
+geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+scale_size_manual(values=c(2,5))+
+geom_line(alpha=0.5)+
+xlab("Effect Strenght")+
+theme_bw()
+```
+
+Varied ATAC peak counts: 
+```{r, varied atac peak counts}
+simSettings <- list.files(gcVariedSimDir, full.names=FALSE)
+
+fullResPaths <- file.path(gcVariedSimDir, simSettings, resPath)
+fullResPaths <- c(fullResPaths[which(grepl("ZNF143", fullResPaths))])
+allGCBiasRanks <- lapply(fullResPaths, function(path){
+  
+  if(file.exists(path) & !grepl("no_gc", path, fixed=TRUE))
+  {
+    name <- unlist(tstrsplit(path, split="/", keep=3))
+    res <- readRDS(path)
+    ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
+    methodNames <- names(ranks)
+    ranks <- do.call("rbind", ranks)
+    ranks$method <- methodNames
+    ranks$setting <- name
+    ranks[,c("tf", "paradigm", "gc", "strength", "effect_strength"):=tstrsplit(setting, split="_", keep=c(1,2, 3, 5, 8))]
+    ranks
+  }
+  else if(file.exists(path))
+  {
+    name <- unlist(tstrsplit(path, split="/", keep=3))
+    res <- readRDS(path)
+    ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
+    methodNames <- names(ranks)
+    ranks <- do.call("rbind", ranks)
+    ranks$method <- methodNames
+    ranks$setting <- name
+    ranks[,c("tf", "paradigm", "gc", "effect_strength"):=tstrsplit(setting, split="_", keep=c(1,2, 3,7))]
+    ranks$strength <- "none"
+    ranks
+  }
+})
+
+allGCBiasRanks <- rbindlist(allGCBiasRanks, use.names = TRUE)
+allRanks <- allGCBiasRanks
+
+allRanks$rank <- as.numeric(allRanks$rank)
+levelsEffect <- as.numeric(unique(allRanks$effect_strength))
+levelsEffect <- levelsEffect[order(levelsEffect)]
+allRanks$effect_strength_f <- factor(allRanks$effect_strength, levels=levelsEffect)
+allRanks[,effect_strength_n:=as.numeric(allRanks$effect_strength)]
+allRanks[, paradigm:=fifelse(paradigm=="happloinsufficiency", "happlo", paradigm)]
+
+ggplot(allRanks, aes(y=effect_strength_f, x=method, fill=sqrt(rank), label=rank))+
+facet_grid(cols=vars(paradigm), rows=vars(gc, strength), scales="free")+
+geom_tile()+
+geom_text()+
+scale_fill_viridis_c(direction=-1)+
+theme_minimal()+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+#ranksLines <- subset(allRanks, method %in% c("CV", "CVnorm", "fisher", "ML", "msVIPER", "npPvalAgg"))
+ranksLines <- allRanks
+ranksLines[,isTop5:=fifelse(rank<=5, TRUE, FALSE)]
+ranksLines[,minTop5Es:=min(effect_strength_n), by=c("method", "name", "isTop5")]
+ranksLines[,isMinTop5Es:=fifelse(isTop5 & effect_strength_n==minTop5Es, TRUE, FALSE)]
+ranksLines[,is_aggregate:=fifelse(method %in% c("fisher", "simes", "stouffer", "npPvalAgg"), "Aggregation", "Method")]
+
+ranksLines[,method:=fifelse(method=="ulm", "ULM", method)]
+ranksLines[,method:=fifelse(method=="CVnorm", "CVadj", method)]
+ranksLines[,method:=fifelse(method=="regreg", "Regreg", method)]
+ranksLines[,method:=fifelse(method=="fisher", "Fisher's", method)]
+ranksLines[,method:=fifelse(method=="simes", "Simes'", method)]
+ranksLines[,method:=fifelse(method=="stouffer", "Stouffer's", method)]
+ranksLines[,method:=fifelse(method=="npPvalAgg", "npAgg", method)]
+ranksLines[,gc:=fifelse(gc=="intermediate", "Intersample variation", gc)]
+ranksLines[,gc:=fifelse(gc=="grouped", "Inter-condition variation", gc)]
+ranksLines[,gc:=fifelse(gc=="no", "Baseline only", gc)]
+
+ranksLinesHapplo <- subset(ranksLines, paradigm=="happlo")
+ranksLinesHapplo[,paradigm:="Haploinsufficency"]
+haploPlot1 <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") & 
+              strength %in% c("none", "weak") & is_aggregate=="Method"), 
+       aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
+       facet_grid(rows=vars(paradigm, is_aggregate), cols=vars(method), scales="free")+
+      scale_color_colorblind()+ 
+       scale_y_log10()+
+#ylim(c(0,100))+
+       geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+       scale_size_manual(values=c(2,5))+
+       geom_line(alpha=0.5)+
+       xlab("Effect strength")+
+       guides(color="none")+
+       theme_minimal()
+haploPlot2 <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") & 
+              strength %in% c("none", "weak") & is_aggregate=="Aggregation"), 
+       aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
+       facet_grid(rows=vars(paradigm, is_aggregate), cols=vars(method), scales="free")+
+       scale_color_colorblind()+ 
+       scale_y_log10()+
+#ylim(c(0,100))+
+       geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+       scale_size_manual(values=c(2,5))+
+       geom_line(alpha=0.5)+
+       guides(color="none")+
+       xlab("Effect strength")+
+       theme_minimal()
+
+ranksLinesAct <- subset(ranksLines, paradigm=="activation")
+ranksLinesAct[,paradigm:="Activation"]
+actPlot1 <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1") & 
+              strength %in% c("none", "weak") & is_aggregate=="Method"), 
+       aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
+       facet_grid(rows=vars(paradigm, is_aggregate), cols=vars(method), scales="free")+
+       scale_color_colorblind()+ 
+       scale_y_log10()+
+#ylim(c(0,100))+
+       geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+       scale_size_manual(values=c(2,5))+
+       geom_line(alpha=0.5)+
+       xlab("Effect strength")+
+       guides(color=guide_legend(title="Setting"))+
+       theme_minimal()+
+       theme(axis.title.x=element_blank())
+actPlot2 <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1") & 
+              strength %in% c("none", "weak") & is_aggregate=="Aggregation"), 
+       aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
+       facet_grid(rows=vars(paradigm, is_aggregate), cols=vars(method), scales="free")+
+       scale_color_colorblind()+ 
+       scale_y_log10()+
+#ylim(c(0,100))+
+       geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+       scale_size_manual(values=c(2,5))+
+       geom_line(alpha=0.5)+
+       xlab("Effect strength")+
+       guides(color=guide_legend(title="Setting"))+
+       theme_minimal()+
+       theme(axis.title.x=element_blank())
+
+actPlot <- ggarrange(actPlot1, actPlot2, ncol=2, common.legend=TRUE)
+haploPlot <- ggarrange(haploPlot1, haploPlot2, ncol=2, common.legend=TRUE)
+gcBiasPlot <- ggarrange(actPlot, haploPlot, nrow=2, common.legend=TRUE)
+gcBiasPlot
+ggsave("gcBiasPlot.png", gcBiasPlot, width=25, height=20, unit="cm")
+
+# just plotting the methods
+actMethodPlot <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1") & 
+              strength %in% c("none", "weak") & is_aggregate=="Method"), 
+       aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
+       facet_grid(rows=vars(paradigm), cols=vars(method), scales="free")+
+       scale_color_colorblind()+ 
+       scale_y_log10()+
+#ylim(c(0,100))+
+       geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+       scale_size_manual(values=c(2,5))+
+       geom_line(alpha=0.5)+
+       xlab("Effect strength")+
+       guides(color=guide_legend(title="Setting"))+
+       theme_minimal()+
+       theme(axis.title.x=element_blank())
+haploMethodPlot <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") & 
+              strength %in% c("none", "weak") & is_aggregate=="Method"), 
+       aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
+       facet_grid(rows=vars(paradigm), cols=vars(method), scales="free")+
+       scale_color_colorblind()+ 
+       scale_y_log10()+
+#ylim(c(0,100))+
+       geom_point(size=3)+
+#geom_point(aes(size =isMinTop5Es))+
+       scale_size_manual(values=c(2,5))+
+       geom_line(alpha=0.5)+
+       xlab("Effect strength")+
+       guides(color="none")+
+       theme_minimal()
+
+gcBiasMethodsPlot <- ggarrange(actMethodPlot, haploMethodPlot, nrow=2, common.legend=TRUE)
+gcBiasMethodsPlot
+ggsave("gcBiasMethodsPlot.png", gcBiasMethodsPlot, width=20, height=20, unit="cm")
+```
+
+## Positive control: 
+```{r}
+allSimDirs <- list.dirs(esPosSimDir)
+allSimDirs <- allSimDirs[grepl("BMresults", allSimDirs) & 
+                         grepl("MAZ", allSimDirs) & 
+                         grepl("motif", allSimDirs)]
+allSimDirs <- file.path(allSimDirs, "bm_res.rds")
+allMotifRanks <- lapply(allSimDirs, function(path){
+  
+  if(file.exists(path))
+  {
+    name <- unlist(tstrsplit(path, split="/", keep=3))
+    res <- readRDS(path)
+    ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
+    methodNames <- names(ranks)
+    ranks <- do.call("rbind", ranks)
+    ranks$method <- methodNames
+    ranks$setting <- name
+
+    ranks[,c("tf", "paradigm", "effect_strength"):=tstrsplit(setting, split="_", keep=c(1,2,8))]
+    ranks
+  }
+})
+
+motifRanksDt <- rbindlist(allMotifRanks)
+motifRanksDt$effect_strength <- as.numeric(motifRanksDt$effect_strength)
+motifRanksDt$effect_strength_f <- factor(motifRanksDt$effect_strength,
+  levels=c(0,0.25,0.5,1,3), ordered=TRUE)
+motifRanksDt$peak_set <- "Motif only"
+
+motifRanksDt[,method:=fifelse(method=="ulm", "ULM", method)]
+motifRanksDt[,method:=fifelse(method=="CVnorm", "CVadj", method)]
+motifRanksDt[,method:=fifelse(method=="regreg", "Regreg", method)]
+motifRanksDt[,method:=fifelse(method=="fisher", "Fisher's", method)]
+motifRanksDt[,method:=fifelse(method=="simes", "Simes'", method)]
+motifRanksDt[,method:=fifelse(method=="stouffer", "Stouffer's", method)]
+motifRanksDt[,method:=fifelse(method=="npPvalAgg", "npAgg", method)]
+motifRanksDt[,min_rank:=min(rank), by=c("method")]
+
+mazAllPeaksDt <- subset(noGCRanks, tf=="MAZ")
+mazAllPeaksDt$peak_set <- "All"
+motifRanksDt <- rbind(motifRanksDt, 
+                      mazAllPeaksDt, fill=TRUE, use.names=TRUE)
+motifRanksDt[,is_aggregate:=fifelse(method %in% c("Fisher's", "Simes'", 
+                                                  "Stouffer's", "npAgg"), 
+                                    "Aggregation", "Method")]
+
+motifRanksDt$rank <- as.numeric(motifRanksDt$rank)
+motifRanksDt$method <- as.character(motifRanksDt$method)
+motifRanksDt$min_rank <- NULL
+motifRanksDt[peak_set=="All" & paradigm=="happloinsufficiency", 
+             min_rank:=min(rank, na.rm=TRUE), 
+             by=c("method")]
+motifRanksDt[peak_set=="All", 
+             mean_rank:=mean(rank, na.rm=TRUE), 
+             by=c("method")]
+setorder(motifRanksDt, mean_rank)
+motifRanksDt$method <- factor(motifRanksDt$method, 
+                              levels=unique(motifRanksDt$method), ordered=TRUE)
+motifRanksDt[,paradigm:=fifelse(paradigm=="happloinsufficiency", "Haploinsufficiency", "Activation")]
+
+
+posControlLines <- ggplot(motifRanksDt, 
+       aes(x=effect_strength_f, group=peak_set, 
+           color=peak_set, y=as.numeric(rank)))+
+geom_point(size=3)+
+geom_line(lwd=1.5)+
+facet_grid(rows=vars(paradigm), cols=vars(method))+
+xlab("Effect strength")+
+scale_color_colorblind()+
+guides(fill=guide_legend(title="Peak Set"))+
+ylab("Rank")+
+theme_bw()+scale_y_sqrt()
+ggsave("posControlLines.png", posControlLines, width=40, height=12, unit="cm")
+
+actControlPlot <- ggplot(subset(motifRanksDt, paradigm=="Activation" & effect_strength %in% c("0", "0.25", "0.5", "1")),
+                         aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(cols=vars(paradigm, peak_set), scales="free")+
+geom_tile()+
+geom_text()+
+binned_scale(aesthetics = "fill",
+               scale_name = "stepsn", 
+               palette = vFunc,
+               breaks = c(1,5,10,25,50,100,200, 700),
+               limits=c(1,700),
+               show.limits = TRUE,
+               guide = "bins")+  
+theme_minimal()+
+ylab("Effect strength")+
+#guides(fill=guide_legend(title="sqrt Rank"))+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
+theme(axis.title.x=element_blank())
+
+happControlPlot <- ggplot(subset(motifRanksDt, paradigm=="Haploinsufficiency"),
+                         aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(cols=vars(paradigm, peak_set), scales="free")+
+geom_tile()+
+geom_text()+
+binned_scale(aesthetics = "fill",
+               scale_name = "stepsn", 
+               palette = vFunc,
+               breaks = c(1,5,10,25,50,100,200, 700),
+               limits=c(1,700),
+               show.limits = TRUE,
+               guide = "bins")+  
+theme_minimal()+
+ylab("Effect strength")+
+#guides(fill=guide_legend(title="sqrt Rank"))+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
+theme(axis.title.x=element_blank())
+
+posControlAllPlot <- ggarrange(actControlPlot, happControlPlot, nrow=2, common.legend=TRUE)
+posControlAllPlot
+ggsave("posControlPlot.png", posControlAllPlot, width=35, height=12, unit="cm")
+
+# Plot only the core methods
+actControlMethodPlot <- ggplot(subset(motifRanksDt, paradigm=="Activation" & 
+                                        effect_strength %in% c("0", "0.25", "0.5", "1") & 
+                                        is_aggregate=="Method"),
+                         aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(cols=vars(paradigm, peak_set), scales="free")+
+geom_tile()+
+geom_text()+
+binned_scale(aesthetics = "fill",
+               scale_name = "stepsn", 
+               palette = vFunc,
+               breaks = c(1,5,10,25,50,100,200, 700),
+               limits=c(1,700),
+               show.limits = TRUE,
+               guide = "bins")+  
+theme_minimal()+
+ylab("Effect strength")+
+#guides(fill=guide_legend(title="sqrt Rank"))+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
+theme(axis.title.x=element_blank())
+
+happControlMethodPlot <- ggplot(subset(motifRanksDt, paradigm=="Haploinsufficiency" &
+                                         is_aggregate=="Method"),
+                         aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
+facet_grid(cols=vars(paradigm, peak_set), scales="free")+
+geom_tile()+
+geom_text()+
+binned_scale(aesthetics = "fill",
+               scale_name = "stepsn", 
+               palette = vFunc,
+               breaks = c(1,5,10,25,50,100,200, 700),
+               limits=c(1,700),
+               show.limits = TRUE,
+               guide = "bins")+  
+theme_minimal()+
+ylab("Effect strength")+
+#guides(fill=guide_legend(title="sqrt Rank"))+
+theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
+theme(axis.title.x=element_blank())
+
+posControlMethodPlot <- ggarrange(actControlMethodPlot, happControlMethodPlot, 
+                                  ncol=2, common.legend=TRUE)
+posControlMethodPlot
+ggsave("posControlMethodPlot.png", posControlMethodPlot, width=35, height=12, unit="cm")
+```
+
+## Peak stats
+
+ChIP-peaks overlapping ATAC-peaks
+```{r}
+atacPeaks <- atacPeakPath
+atacPeaks <- fread(atacPeaks, select=1:3, col.names=c("chr", "start", "end"))
+atacPeaks <- makeGRangesFromDataFrame(as.data.frame(atacPeaks))
+
+tfPeaks <- list.files(chipPeaksDir, full.names=TRUE)
+tfPeaks <- tfPeaks[!grepl("motif", tfPeaks)]
+namesPeaks <- unlist(tstrsplit(tfPeaks, split="_", keep=3))
+tfPeaks <- lapply(tfPeaks, fread, col.names=c("chr", "start", "end", paste0("V", 4:10)))
+tfPeaks <- lapply(tfPeaks, as.data.frame)
+tfPeaks <- lapply(tfPeaks, makeGRangesFromDataFrame, keep.extra.columns=TRUE)
+
+tfOvPeaks <- lapply(tfPeaks, subsetByOverlaps, atacPeaks)
+tfOvPeaks <- lapply(tfOvPeaks, length)
+names(tfOvPeaks) <- namesPeaks
+tfOvPeaks
+nPeaks <- lapply(tfPeaks, length)
+
+fracOvAtac <- unlist(tfOvPeaks)/unlist(nPeaks)
+enrDt <- data.table(tf=c("CEBPB", "SMARCA5", "MAZ", "ZNF143"),
+                    frac_ov_chip=fracOvAtac,
+                    n_chIP_peaks=unlist(nPeaks), 
+                    n_chIP_ov_atac_peaks=unlist(tfOvPeaks))
+```
+
+Fraction of ATAC-peaks having a motif:
+```{r}
+pmoi <- readRDS(motifMatchesPath)
+pmoiDt <- as.data.table(pmoi)
+atacPeaksDt <- as.data.table(atacPeaks)
+atacPeaksDt$peak_id <- 1:nrow(atacPeaksDt)
+setkeyv(atacPeaksDt, c("seqnames", "start", "end"))
+pmoiDt <- foverlaps(pmoiDt, atacPeaksDt, 
+                    by.x=c("seqnames", "start", "end"), 
+                    by.y=c("seqnames", "start", "end"), type="any")
+pmoiDt <- unique(pmoiDt, by=c("motif_id", "peak_id"))
+pmoiSubDt <- subset(pmoiDt, grepl("CEBPB",motif_id) | grepl("MAZ",motif_id) | 
+                      grepl("ZN143",motif_id) | grepl("SMCA5",motif_id))
+dts <- split(pmoiSubDt, by=c("motif_alt_id"))
+nAtacMotifPeaks <- unlist(lapply(dts, nrow))
+fracAtacMotifPeaks <- nAtacMotifPeaks/length(atacPeaks)
+fracAtacMotifPeaks
+
+enrDt$frac_atac_motif <- c(fracAtacMotifPeaks[1], fracAtacMotifPeaks[3], fracAtacMotifPeaks[2], fracAtacMotifPeaks[4])
+enrDt$n_atac_motif <- c(nAtacMotifPeaks[1], nAtacMotifPeaks[3], nAtacMotifPeaks[2], nAtacMotifPeaks[4])
+# save CEBPB peaks with motif overlapping ATAC peaks
+#fwrite(dts$CEBPB_HUMAN.H11MO.0.A[,c("seqnames", "start", "end"), with=FALSE], "./tf_peaks/CEBPB_peaks_with_motif.bed")
+```
+
+Fraction of chIP-peaks having a motif:
+```{r}
+pmoiDt <- as.data.table(pmoi)
+
+namesPeaks <- unlist(tstrsplit(namesPeaks, split=".", fixed=TRUE, keep=1))
+motifNames <- c("CEBPB","SMCA5", "MAZ",  "ZN143")
+
+fracs <- lapply(1:length(namesPeaks), function(i){
+  
+  chIPPeak <- tfPeaks[[i]]
+  tfName <- motifNames[[i]]
+  subPeaks <- chIPPeak
+  #subPeaks <- subsetByOverlaps(chIPPeak, atacPeaks)
+  
+  subPeaks <- as.data.table(subPeaks)
+  subPeaks$peak_id <- 1:nrow(subPeaks)
+  setkeyv(subPeaks, c("seqnames", "start", "end"))
+  
+  pmoiSubDt <- subset(pmoiDt, grepl(tfName, motif_id))
+  
+  pmoiSubDt <- foverlaps(pmoiSubDt, subPeaks, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="any")
+  pmoiSubDt <- unique(pmoiSubDt, by=c("peak_id"))
+  
+  return(data.table(n_chIP_peak_w_motif=nrow(pmoiSubDt),
+                      frac_chip_ov_w_motif=nrow(pmoiSubDt)/nrow(subPeaks)))
+})
+#names(fracs) <- namesPeaks
+#unlist(fracs)
+enrDt <- cbind(enrDt, rbindlist(fracs))
+```
+
+Fraction of chIP-peaks overlapping ATAC peaks having a motif:
+```{r}
+fracs <- lapply(1:length(namesPeaks), function(i){
+  
+  chIPPeak <- tfPeaks[[i]]
+  tfName <- motifNames[[i]]
+  subPeaks <- subsetByOverlaps(chIPPeak, atacPeaks)
+  
+  subPeaks <- as.data.table(subPeaks)
+  subPeaks$peak_id <- 1:nrow(subPeaks)
+  setkeyv(subPeaks, c("seqnames", "start", "end"))
+  
+  pmoiSubDt <- subset(pmoiDt, grepl(tfName, motif_id))
+  
+  pmoiSubDt <- foverlaps(pmoiSubDt, subPeaks, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="any")
+  pmoiSubDt <- unique(pmoiSubDt, by=c("peak_id"))
+  
+  return(frac_chip_ov_w_motif=nrow(pmoiSubDt)/nrow(subPeaks))
+})
+names(fracs) <- namesPeaks
+unlist(fracs)
+```
+
+Fraction of chIP-peaks overlapping ATAC peaks having a motif (alternative way of calculation):
+```{r}
+fracs <- lapply(1:length(namesPeaks), function(i){
+  
+  chIPPeak <- tfPeaks[[i]]
+  tfName <- motifNames[[i]]
+  subPeaks <- subsetByOverlaps(chIPPeak, atacPeaks)
+  
+  subPeaks <- as.data.table(subPeaks)
+  subPeaks$peak_id <- 1:nrow(subPeaks)
+  setkeyv(subPeaks, c("seqnames", "start", "end"))
+  
+  pmoiSubDt <- subset(pmoiDt, grepl(tfName, motif_id))
+  pmoiSubDt <- subset(pmoiSubDt, !is.na(seqnames) & !is.na(start) & !is.na(end))
+  
+  pmoiSubDt <- foverlaps(pmoiSubDt, subPeaks, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="any")
+  pmoiSubDt <- unique(pmoiSubDt, by=c("peak_id"))
+  
+  subPeaksChIP <- subPeaks[unique(pmoiSubDt$peak_id)]
+  print(nrow(subPeaksChIP)/nrow(subPeaks))
+})
+```
+
+Fraction of ChIP peaks overlapping an ATAC-seq peak with a motif
+```{r}
+fracs <- lapply(1:length(namesPeaks), function(i){
+  
+  chIPPeak <- tfPeaks[[i]]
+  tfName <- motifNames[[i]]
+  subPeaks <- atacPeaks
+
+  subPeaksDt <- as.data.table(subPeaks)
+  subPeaksDt$peak_id <- 1:nrow(subPeaksDt)
+  setkeyv(subPeaksDt, c("seqnames", "start", "end"))
+  
+  pmoiSubDt <- subset(pmoiDt, grepl(tfName, motif_id))
+  pmoiSubDt <- subset(pmoiSubDt, !is.na(seqnames) & !is.na(start) & !is.na(end))
+  
+  pmoiSubDt <- foverlaps(pmoiSubDt, subPeaksDt, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="any")
+  pmoiSubDt <- unique(pmoiSubDt, by=c("peak_id"))
+  
+  ids <- pmoiSubDt$peak_id
+  ids <- unique(ids[!is.na(ids)])
+  withMotifPeaks <- subPeaks[ids]
+  subPeaksChIP <- subsetByOverlaps(chIPPeak, withMotifPeaks)
+  print(length(subPeaksChIP)/length(chIPPeak))
+  print(length(subPeaksChIP))
+  
+   fwrite(as.data.table(subPeaksChIP)[,c("seqnames", "start", "end", paste0("V", 4:10))], file.path("./tf_peaks", paste(tfName, "peaks_with_motif.bed", sep="_")))
+   
+   fracs <- length(subPeaksChIP)/length(chIPPeak)
+   
+   return(data.table(frac_chip_atac_motif=length(subPeaksChIP)/length(chIPPeak),
+                     n_chip_atac_motif=length(subPeaksChIP)))
+})
+enrDt <- cbind(enrDt, rbindlist(fracs))
+
+#enrDt$frac_chip_atac_motif <- unlist(fracs)
+```
+
+n_motifs within chip vs all motifs
+```{r}
+fracs <- lapply(1:length(namesPeaks), function(i){
+  
+  chIPPeak <- tfPeaks[[i]]
+  tfName <- motifNames[[i]]
+  subPeaks <- chIPPeak
+
+  subPeaksDt <- as.data.table(subPeaks)
+  subPeaksDt$peak_id <- 1:nrow(subPeaksDt)
+  setkeyv(subPeaksDt, c("seqnames", "start", "end"))
+  
+  pmoiSubDt <- subset(pmoiDt, grepl(tfName, motif_id))
+  pmoiSubDt <- subset(pmoiSubDt, !is.na(seqnames) & !is.na(start) & !is.na(end))
+  nMotifs <- nrow(pmoiSubDt)
+  pmoiSubDt[,motif_pos_id:=paste(seqnames, start, end, sep="_")]
+  
+  pmoiSubDt1 <- foverlaps(pmoiSubDt, subPeaksDt, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="within",
+                      nomatch=NULL)
+
+  # get all motifs within atac peaks
+  subPeaksDt <- as.data.table(atacPeaks)
+  subPeaksDt$peak_id <- 1:nrow(subPeaksDt)
+  subPeaksDt <- subset(subPeaksDt, !is.na(seqnames) & !is.na(start) & !is.na(end))
+  setkeyv(subPeaksDt, c("seqnames", "start", "end"))
+  pmoiSubDtAtac <- foverlaps(pmoiSubDt, subPeaksDt, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="within",
+                      nomatch=NULL)
+  pmoiSubDtAtac <- unique(pmoiSubDtAtac, by=c("motif_pos_id"))
+
+  # get all motifs within chIP peaks
+  peaksChIPDt <- as.data.table(chIPPeak)
+  peaksChIPDt$chip_peak_id <- 1:nrow(peaksChIPDt)
+  setkeyv(peaksChIPDt, c("seqnames", "start", "end"))
+
+  pmoiSubDt2 <- foverlaps(pmoiSubDtAtac[,c("seqnames", "start", "end", "motif_pos_id")], peaksChIPDt, 
+                      by.x=c("seqnames", "start", "end"), 
+                      by.y=c("seqnames", "start", "end"), type="within", 
+                      nomatch=NULL)
+  
+  nMotifOutside <- length(unique(pmoiSubDt$motif_pos_id)) - length(unique(pmoiSubDt2$motif_pos_id))
+  nMotifOutsideAtac <- length(unique(pmoiSubDtAtac$motif_pos_id)) - length(unique(pmoiSubDt2$motif_pos_id))
+  
+   return(data.table(n_motif_within_chip=length(unique(pmoiSubDt1$motif_pos_id)),
+                     n_motif_with_chip_ov_atac=length(unique(pmoiSubDt2$motif_pos_id)),
+                     n_motif_outside=nMotifOutside,
+                     n_motif_outside_atac=nMotifOutsideAtac,
+                     n_chip_peaks_ov_atac_motif=length(unique(pmoiSubDt2$chip_peak_id)),
+                     n_motif=nMotifs))
+})
+enrDt <- cbind(enrDt, rbindlist(fracs, use.names=TRUE))
+```
+
+Enrichment Plots
+```{r, enrichment plots}
+nMotifMatches <- c(nrow(subset(pmoiDt, grepl("CEBPB", motif_id))),
+                   nrow(subset(pmoiDt, grepl("MAZ", motif_id))),
+                   nrow(subset(pmoiDt, grepl("ZN143", motif_id))))
+enrDt <- subset(enrDt, tf!="SMARCA5")
+enrDt$n_motif_matches <- nMotifMatches
+enrDt[,enr_motif_chip_ov_atac:=n_motif_with_chip_ov_atac/n_motif_outside_atac]
+enrDt[,enr_motif_chip_peaks_ov_atac:=n_chip_peaks_ov_atac_motif/n_motif_outside_atac]
+
+a <- ggplot(enrDt, aes(fill=enr_motif_chip_ov_atac, x=tf, y="Fraction"))+
+  geom_tile()+
+  scale_fill_viridis_c()+
+  theme_minimal()+
+  ylab("")+
+  guides(fill=guide_legend(title="[N motifs within a ChIP-peak] / [N motifs outside]",
+                           title.position="top"))+
+  theme(axis.title.y=element_blank(),
+        axis.title.x=element_blank(),
+        legend.position = "top")
+a
+
+b <- ggplot(enrDt, aes(fill=enr_motif_chip_peaks_ov_atac, x=tf, y="Fraction"))+
+  geom_tile()+
+  scale_fill_viridis_c()+
+  theme_minimal()+
+  ylab("")+
+  guides(fill=guide_legend(title="[N ChIP-peaks with a motif] / [N motifs outside]",
+                           title.position="top"))+
+  theme(axis.title.y=element_blank(),
+        axis.title.x=element_blank(),
+        legend.position = "top")
+
+fracPlot <- ggarrange(a,b, nrow=2)
+ggsave("fracPlot.png", fracPlot, width=12, heigh=10, units="cm")
+```
+
+# Motif quality Plots
+
+```{r}
+library(TFBSTools)
+library(universalmotif)
+library(PWMEnrich)
+
+motifs <- getNonRedundantMotifs(format = "PFMatrix", 
+                                species = "Hsapiens")
+motifsSub <- motifs[c("RUNX1", "RUNX2", "GATA1", "GATA2", "MYC", "KLF1", "ESR1", "ESR2","ZN134", "GCR", "MAZ", "CEBPB")] # "NR3C1", "ZNF143"
+
+motifQual <- lapply(motifsSub, function(motif){
+  
+  # TFBStools
+  icm_tfbs <- sum(toICM(motif)@profileMatrix)
+  sumLl <- sum(colMaxs(motif@profileMatrix))/ncol(motif@profileMatrix)
+  #sumAll <- sum(colSums(motif@profileMatrix))
+ 
+  # universalMotif
+  #motif@strand <- "+-"
+  #icm_um <- convert_type(motif, type="ICM")
+  #icm_um <- sum(icm_um@profileMatrix)
+  
+  # PWMEnrich
+  pwm <- PWMEnrich::toPWM(motif@profileMatrix)
+  ic_pwmEnrich1 <- motifIC(pwm)
+  ic_pwmEnrich2 <- motifIC(motif@profileMatrix)
+  
+  data.table(ICM_enrich=ic_pwmEnrich1,
+             sum_pwm=sumLl,
+             ICM_tfbs=icm_tfbs,
+             tf=motif@name)
+})
+motifQual <- rbindlist(motifQual)
+
+setorder(motifQual, ICM_tfbs)
+motifQual$tf <- factor(motifQual$tf, levels=unique(motifQual$tf), ordered=TRUE)
+
+#motifQual <- melt(motifQual, id.vars="tf")
+icmPlot <- ggplot(motifQual, aes(y=tf, x="ICM", fill=ICM_tfbs))+
+  geom_tile()+
+  xlab("ICM")+
+  scale_fill_viridis_c()+
+  theme_minimal()+
+  guides(fill=guide_legend(title="ICM"))+
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank())
+icmPlot
+
+c("RUNX1", "RUNX2", "GATA1", "GATA2", "MYC", 
+  "NR1H4", "KLF1", "ESR1", "ESR2","ZN134", "GCR", "MAZ", "CEBPB")
+motifQual$best_auroc <- c(0.964, 	0.965, 	0.981, 0.958, 0.947,
+                          0.944, 	0.971, 0.944, 0.923, 	0.978, 0.951, 	0.981)
+
+
+aurocPlot <- ggplot(motifQual, aes(y=tf, x="auROC", fill=best_auroc))+
+  geom_tile()+
+  xlab("Best auROC (Hocomoco)")+
+  scale_fill_viridis_c()+
+  theme_minimal()+
+  guides(fill=guide_legend(title="auROC (Hocomoco)"))+
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank())
+
+qualHuman <- ggarrange(icmPlot, aurocPlot, ncol=2)
+qualHuman
+ggsave("motifQuality.png", qualHuman, width=15, heigh=10, units="cm")
+
+motifs <- getNonRedundantMotifs(format = "PFMatrix", 
+                                species = "Mmusculus")
+motifsSub <- motifs[c("NR1H4")] # "NR3C1", "ZNF143"
+
+motifQualMouse <- lapply(motifsSub, function(motif){
+  
+  # TFBStools
+  icm_tfbs <- sum(toICM(motif)@profileMatrix)
+  sumLl <- sum(colMaxs(motif@profileMatrix))/ncol(motif@profileMatrix)
+  #sumAll <- sum(colSums(motif@profileMatrix))
+ 
+  # universalMotif
+  #motif@strand <- "+-"
+  #icm_um <- convert_type(motif, type="ICM")
+  #icm_um <- sum(icm_um@profileMatrix)
+  
+  # PWMEnrich
+  pwm <- PWMEnrich::toPWM(motif@profileMatrix)
+  ic_pwmEnrich1 <- motifIC(pwm)
+  ic_pwmEnrich2 <- motifIC(motif@profileMatrix)
+  
+  data.table(ICM_enrich=ic_pwmEnrich1,
+             sum_pwm=sumLl,
+             ICM_tfbs=icm_tfbs,
+             tf=motif@name)
+})
+motifQualMouse <- rbindlist(motifQualMouse)
+
+icmMousePlot <- ggplot(motifQualMouse, aes(y=tf, x="ICM", fill=ICM_tfbs))+
+  geom_tile()+
+  xlab("ICM")+
+  scale_fill_viridis_c()+
+  theme_minimal()+
+  guides(fill=guide_legend(title="ICM"))+
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank())
+```

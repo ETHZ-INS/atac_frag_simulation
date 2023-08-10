@@ -1,0 +1,318 @@
+---
+author: "Emanuel Sonder"
+date: "16 6 2023"
+output: html_document
+params:
+  tfName:
+    label: "tfName"
+    value: MAZ
+    input: text
+  chIPPeakPath:
+    label: "chIPPeakPath"
+    value: ./tf_peaks/maz_peaks.narrowPeak
+    input: text
+  atacPeakPath:
+    label: "atacPeakPath"
+    value: ./tf_peaks/maz_peaks.narrowPeak
+    input: text
+  lfcDistPath:
+    label: "lfcDistPath"
+    value: ./lfc_dist/happloinsufficiency.rds
+    input: select
+    choices: [./lfc_dist/happloinsufficiency.rds, ./lfc_dist/happloinsufficency.rds]
+  outDir:
+    label: "outDir"
+    value: ./outDir
+    input: text
+  effectStrengths:
+    label: "effectStrengths"
+    value: 0.0,0.5,1.0,2.0,4.0
+  sampleDir:
+    label: "sampleDir"
+    value: "./atac_bams"
+    input: text
+  samples:
+    label: "samples"
+    value: ENCFF495DQP.rds,ENCFF130DND.rds,ENCFF447ZRG.rds,ENCFF966ELR.rds,ENCFF358GWK.rds,ENCFF963YZH.rds
+    input: text
+  sampleNames:
+    label: "sampleNames"
+    value: treat1,treat2,treat3,ctrl1,ctrl2,ctrl3
+    input: text
+  gcBiasesFiles:
+    label: "gcBiasesFiles"
+    value: NULL,NULL,NULL,NULL,NULL,NULL
+    input: text
+  design:
+    label: "design"
+    value: 1,1,1,-1,-1,-1
+    input: text
+  simCodeDir:
+    label: "simCodeDir"
+    value: ../atacSignalSimulation.R
+    input: text
+  newTitle:
+    label: "newTitle"
+    value: "Fragment Simulations"
+    input: text
+  probNfGrp1:
+    label: "probNfGrp1" 
+    value: NULL
+    input: text
+  probMonoGrp1:
+    label: "probMonoGrp1" 
+    value: NULL
+    input: text
+  probDiGrp1:
+    label: "probDiGrp1" 
+    value: NULL
+    input: text
+  probTriGrp1:
+    label: "probTriGrp1" 
+    value: NULL
+    input: text
+  probNfGrp2:
+    label: "probNfGrp1" 
+    value: NULL
+    input: text
+  probMonoGrp2:
+    label: "probMonoGrp1" 
+    value: NULL
+    input: text
+  probDiGrp2:
+    label: "probDiGrp1" 
+    value: NULL
+    input: text
+  probTriGrp2:
+    label: "probTriGrp1" 
+    value: NULL
+    input: text
+  simGCBias:
+    label: "simGCBias"
+    value: FALSE
+  simFLD:
+    label: "simFLD"
+    value: FALSE
+  lfcParadigm:
+    label: "lfcParadigm"
+    value: "activation"
+    input: textq
+  gcBiasSettingName:
+    label: "gcBiasSettingName"
+    value: "same"
+    input: text
+  FLDSettingName:
+    label: "FLDSettingName"
+    value: "same"
+    input: text
+  varyAtacPeaks:
+    label: "varyAtacPeaks"
+    value: TRUE
+title: "`r params$newTitle`"
+---
+
+```{r setup, include=FALSE}
+library(Repitools)
+library(data.table)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(GenomicRanges)
+library(ggplot2)
+library(BiocParallel)
+library(parallel)
+source(params$simCodeDir)
+
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load the necessary data
+
+## 1. Load the Peak coordinates and the enrichments over the input
+
+Here the column names of the peaks have to be provided to the simulation function. If not the generic narrow peak columns are assumed (see arguments: `colNamesChIPPeaks`, `colNamesAtacPeaks`). 
+```{r, load peaks, eval=TRUE}
+chIPPeakDir <- params$chIPPeakPath
+atacPeakDir <- params$atacPeakPath
+
+atacPeaks <- fread(atacPeakDir)
+head(atacPeaks, 5)
+
+chIPPeaks <- fread(chIPPeakDir)
+head(chIPPeaks, 5)
+```
+
+## 2. Load the logFC vs Enrichment Distributions
+
+Here the distribution of the logFC & enrichments in the NR3C1 experiment are loaded. The first column of this data.table needs to be enrichment column and the second the log fold change column (with the name, see argument: lfcCol)
+```{r, logFC dist, eval=TRUE}
+lfcDist <- readRDS(params$lfcDistPath)
+```
+
+```{r, exp design, eval=TRUE}
+bamDirs <- file.path(params$sampleDir, params$samples)
+```
+
+# Simulate 
+
+## Set the params by group 
+
+Here we dont need any params as we dont change gc bias or fld (just empty data.tables)
+```{r params group, eval=TRUE}
+paramsGroup1 <- data.table(gcBiases=params$gcBiasesFiles[which(params$design==1)], 
+                           prob_nf=params$probNfGrp1, 
+                           prob_mono=params$probMonoGrp1,
+                           prob_di=params$probDiGrp1, 
+                           prob_tri=params$probTriGrp1)
+
+paramsGroup2 <- data.table(gcBiases=params$gcBiasesFiles[which(params$design==-1)], 
+                           prob_nf=params$probNfGrp2, 
+                           prob_mono=params$probMonoGrp2,
+                           prob_di=params$probDiGrp2, 
+                           prob_tri=params$probTriGrp2)
+paramsGroup1$name <- "group1"
+paramsGroup2$name <- "group2"
+```
+
+## Simulate Settings
+
+regions to simulate:
+```{r, load the genome and coords all chr, eval=TRUE}
+which <- GRanges(Rle(paste0("chr", 1:22)), IRanges(start=1, width=536870912))
+genome <- BSgenome.Hsapiens.UCSC.hg38
+```
+
+```{r, error=TRUE, eval=TRUE}
+if(length(params$effectStrengths)>1)
+{
+  BPPARAM=SnowParam(workers=min(4, length(params$effectStrengths)))
+} else{
+  BPPARAM=SerialParam()
+}
+
+simDatasets <- bplapply(params$effectStrengths, function(es,
+                                        bamPaths, 
+                                        chIPPeakDir,
+                                        atacPeakDir,
+                                        sampleNames,
+                                        gcBiases,
+                                        fracSub,
+                                        design,
+                                        paramsGroup1,
+                                        paramsGroup2,
+                                        lfcDist,
+                                        which,
+                                        genome,
+                                        simFLD,
+                                        simGCBias,
+                                        seed,
+                                        tfName,
+                                        lfcParadigm,
+                                        gcBiasSettingName,
+                                        FLDSettingName,
+                                        simDir,
+                                        outDir,
+                                        varyAtacPeaks){ 
+  
+  source(simDir)
+  library(data.table)
+  library(Repitools)
+  library(GenomicRanges)
+  library(GenomeInfoDb)
+  library(BSgenome.Hsapiens.UCSC.hg38)
+  library(GenomicAlignments)
+  
+  simData <- simAtacData(bamPaths=bamPaths, 
+                         chIPPeakDir=chIPPeakDir,
+                         atacPeakDir=atacPeakDir,
+                         sampleNames=sampleNames,
+                         effectStrength=es,
+                         gcBiases=gcBiases,
+                         fracSub=fracSub,
+                         design=design,
+                         paramsGroup1=paramsGroup1,
+                         paramsGroup2=paramsGroup2,
+                         lfcDist=lfcDist,
+                         which=which,
+                         genome=genome,
+                         simGCBias=simGCBias,
+                         simFLD=simFLD,
+                         varyAtacPeaks=varyAtacPeaks,
+                         colNamesChIPPeaks=c("chr","start", "end", 
+                                            "name", "score", "strand",
+                                            "signalValue", "pValue", "qValue", "peak"),
+                         colNamesAtacPeaks=c("chr","start", "end", 
+                                            "name", "score", "strand",
+                                            "signalValue", "pValue", "qValue", "peak"),
+                         enrColChIPName="signalValue",
+                         enrColAtacName="signalValue",
+                         lfcCol="lfc",
+                         annotationStyle="UCSC",
+                         maxReadPerPeak=1e6,
+                         seed=42)
+  
+  folderName <- paste(tfName,
+                      lfcParadigm,
+                      gcBiasSettingName,
+                      FLDSettingName, 
+                      es, sep="_")
+  if(!dir.exists(file.path(outDir,folderName))) dir.create(file.path(outDir,folderName))
+  simDataPath <-  file.path(outDir, folderName, "simfrags.rds")
+  saveRDS(simData, simDataPath)
+  simFrags <- simData[[1]]
+  
+ # bed file format: chrom, start, end, name
+  bedSim <- simFrags[,c("seqnames", "start", "end", "sample", "gc_content", "strand"), with=FALSE]
+  bedSim$strand <- "."
+  bedSim$score <- 0L
+  bedSim$name <- "."
+  bedSimMerged <- copy(bedSim)
+  bedSimMerged$sample <- "merged"
+  colnames(bedSimMerged) <- c("chrom", "chromStart", "chromEnd", "sample", "gc_content", "name", "score", "strand")
+
+  # save merged bed file
+  mergedFilePath <- file.path(outDir, folderName, "mergedSamples.bed")
+  setorder(bedSimMerged, chrom, chromStart, chromEnd)
+  write.table(bedSimMerged[,c("chrom", "chromStart", "chromEnd", "name", "score", "strand"), with=FALSE], 
+              mergedFilePath,
+              quote=FALSE, col.names=FALSE,
+              sep="\t", 
+              row.names=FALSE)
+
+  # save .bed file by sample
+  bedSim <- split(bedSim, by="sample")
+  lapply(names(bedSim),function(sample){
+    setorder(bedSim[[sample]], seqnames, start, end)
+    singleFilePaths <- file.path(outDir, folderName, paste0(sample, ".bed"))
+    write.table(bedSim[[sample]][,c("seqnames", "start", "end", "name", "score", "strand"), with=FALSE], 
+                singleFilePaths,
+                quote=FALSE, col.names=FALSE,
+                sep="\t", 
+                row.names=FALSE)})
+  
+  gc()
+  return(null)
+  },
+  bamPaths=bamDirs, 
+  chIPPeakDir=params$chIPPeakPath,
+  atacPeakDir=params$atacPeakPath,
+  sampleNames=params$sampleNames,
+  gcBiases=params$gcBiasesFiles,
+  fracSub=1,
+  design=params$design,
+  paramsGroup1=paramsGroup1,
+  paramsGroup2=paramsGroup2,
+  lfcDist=lfcDist,
+  which=which,
+  genome=BSgenome.Hsapiens.UCSC.hg38,
+  simFLD=params$simFLD,
+  simGCBias=params$simGCBias,
+  seed=42,
+  tfName=params$tfName,
+  lfcParadigm=params$lfcParadigm,
+  gcBiasSettingName=params$gcBiasSettingName,
+  FLDSettingName=params$FLDSettingName,
+  simDir=params$simCodeDir,
+  outDir=params$outDir,
+  varyAtacPeaks=params$varyAtacPeaks,
+  BPPARAM=BPPARAM)
+```
