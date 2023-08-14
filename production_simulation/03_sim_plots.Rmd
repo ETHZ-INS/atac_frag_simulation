@@ -19,15 +19,15 @@ library(matrixStats)})
 
 Paths
 ```{r, path definition}
-haploParaPath <- "./lfc_dist/happloinsufficiency.rds"
-actParaPath <- "./lfc_dist/activation.rds"
+haploParaPath <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/lfc_dist/happloinsufficiency.rds"
+actParaPath <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/lfc_dist/activation.rds"
 
-esSimDir <- gcVariedSimDir <- "./out_final"
-gcNonVariedSimDir <- esPosSimDir <- "./out_test"
+esSimDir <- gcVariedSimDir <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/out_final"
+gcNonVariedSimDir <- esPosSimDir <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/out_test"
 resPath <- "BMresults/bm_res.rds"
-atacPeakPath <- "./atac_peaks/filtered_mergedSamples_atac_peaks.bed_peaks.narrowPeak"
-chipPeaksDir <- "./tf_peaks"
-motifMatchesPath <- "./atac_peaks/pmoi.rds"
+atacPeakPath <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/atac_peaks/filtered_mergedSamples_atac_peaks.bed_peaks.narrowPeak"
+chipPeaksDir <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/tf_peaks"
+motifMatchesPath <- "/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/atac_peaks/pmoi.rds"
 motifsPath <- "/mnt/plger/fgerbaldo/DTFAIB/KLF1/ATACr_results/others/motifs.rds"
 ```
 
@@ -86,14 +86,80 @@ lfcPlot <- ggplot(lfcDist, aes(x=lfc,
 geom_density(lwd=1.5)+
 #facet_grid(cols=vars(paradigm), scales="free")+
 xlab("Log fold changes")+
-scale_color_manual(values=c("#000000", "#E69F00"))+
+ylab("Density")+  
+scale_color_manual(values=c("#FF0000","#0000FF"))+
 guides(color=guide_legend(title=""))+
 xlim(c(-4.5,4.5))+
-theme_bw()
+theme_minimal()
 lfcPlot
 
 ggsave("lfcDist.png", lfcPlot, units="cm", width=12, height=8)
 ```
+
+```{r}
+lfcA <- subset(lfcDist, lfcDist$paradigm=="Activation")
+lfcA$enr <- scale(lfcA$enr, center=TRUE, scale=TRUE)
+
+ggplot(lfcA, aes(x=enr,y=lfc))+
+  geom_density2d_filled()+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("Observed Activation")+
+  xlab("Relative Enrichment")+
+  ylab("Log FCs")+
+  xlim(c(-2.5,2.5))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+```{r}
+lfcA <- subset(lfcDist, lfcDist$paradigm=="Activation")
+
+ggplot(lfcA, aes(x=enr,y=lfc))+
+  geom_density2d_filled()+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("")+
+  xlab("Relative enrichment")+
+  ylab("Log fold changes")+
+  xlim(c(0,100))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+ggsave("ActFCEnr.png", width=8, height=10, unit="cm")
+```
+
+```{r}
+lfcH <- subset(lfcDist, lfcDist$paradigm=="Haploinsufficiency")
+lfcH$enr <- scale(lfcH$enr, center=TRUE, scale=TRUE)
+
+ggplot(lfcH, aes(x=enr,y=lfc))+
+  geom_density2d_filled()+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("")+
+  xlab("Relative Enrichment")+
+  ylab("Log FCs")+
+  xlim(c(-2.5,2.5))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+```{r}
+lfcH <- subset(lfcDist, lfcDist$paradigm=="Haploinsufficiency")
+
+ggplot(lfcH, aes(x=enr,y=lfc))+
+  geom_density2d_filled()+
+  geom_hline(yintercept=0, lty=2, color="white", lwd=1.2)+
+  ggtitle("")+
+  xlab("Relative enrichment")+
+  ylab("Log fold changes")+
+  xlim(c(-2.5,2.5))+
+  ylim(c(-2,2))+
+  theme_minimal()+
+  theme(legend.position = "none")
+ggsave("HapFCEnr.png", width=8, height=10, unit="cm")
+```
+
 
 ## Effect Strength
 
@@ -107,7 +173,7 @@ allRanks <- lapply(fullResPaths, function(path){
   
   if(file.exists(path))
   {
-    name <- unlist(tstrsplit(path, split="/", keep=3))
+    name <- unlist(tstrsplit(path, split="/", keep=11))
     res <- readRDS(path)
     ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
     methodNames <- names(ranks)
@@ -194,6 +260,9 @@ ylab("Effect strength")+
 theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
 theme(axis.title.x=element_blank())
 
+actPlot <- actPlot +
+  labs(fill = "Rank")
+
 happRanks <- subset(allRanks, !is.na(effect_strength_f) & paradigm=="happloinsufficiency")
 happRanks[,min_tf_rank:=min(rank), by=c("method", "tf")]
 happRanks[,min_mean_rank:=mean(min_tf_rank), by=c("method")]
@@ -218,6 +287,9 @@ theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
 theme(axis.title.x=element_blank(),
       legend.position = 'top')
 
+happPlot <- happPlot +
+  labs(fill = "Rank")
+
 esPlot <- ggarrange(actPlot, happPlot, ncol=2, common.legend=TRUE)
 esPlot
 ggsave("esPlot.png", esPlot, width=25, heigh=20, units="cm")
@@ -236,7 +308,7 @@ allGCBiasRanks <- lapply(fullResPaths, function(path){
   
   if(file.exists(path) & !grepl("no_gc", path, fixed=TRUE))
   {
-    name <- unlist(tstrsplit(path, split="/", keep=3))
+    name <- unlist(tstrsplit(path, split="/", keep=11))
     res <- readRDS(path)
     ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
     methodNames <- names(ranks)
@@ -248,7 +320,7 @@ allGCBiasRanks <- lapply(fullResPaths, function(path){
   }
   else if(file.exists(path))
   {
-    name <- unlist(tstrsplit(path, split="/", keep=3))
+    name <- unlist(tstrsplit(path, split="/", keep=11))
     res <- readRDS(path)
     ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
     methodNames <- names(ranks)
@@ -308,7 +380,7 @@ allGCBiasRanks <- lapply(fullResPaths, function(path){
   
   if(file.exists(path) & !grepl("no_gc", path, fixed=TRUE))
   {
-    name <- unlist(tstrsplit(path, split="/", keep=3))
+    name <- unlist(tstrsplit(path, split="/", keep=11))
     res <- readRDS(path)
     ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
     methodNames <- names(ranks)
@@ -320,7 +392,7 @@ allGCBiasRanks <- lapply(fullResPaths, function(path){
   }
   else if(file.exists(path))
   {
-    name <- unlist(tstrsplit(path, split="/", keep=3))
+    name <- unlist(tstrsplit(path, split="/", keep=11))
     res <- readRDS(path)
     ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
     methodNames <- names(ranks)
@@ -383,6 +455,7 @@ haploPlot1 <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") &
        scale_size_manual(values=c(2,5))+
        geom_line(alpha=0.5)+
        xlab("Effect strength")+
+        ylab("Rank") +
        guides(color="none")+
        theme_minimal()
 haploPlot2 <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") & 
@@ -398,6 +471,7 @@ haploPlot2 <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") &
        geom_line(alpha=0.5)+
        guides(color="none")+
        xlab("Effect strength")+
+       ylab("Rank") +
        theme_minimal()
 
 ranksLinesAct <- subset(ranksLines, paradigm=="activation")
@@ -414,9 +488,11 @@ actPlot1 <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1") &
        scale_size_manual(values=c(2,5))+
        geom_line(alpha=0.5)+
        xlab("Effect strength")+
-       guides(color=guide_legend(title="Setting"))+
+        ylab("Rank") +
+       guides(color=guide_legend(title=""))+
        theme_minimal()+
-       theme(axis.title.x=element_blank())
+        theme(legend.spacing.x = unit(0.5, "cm"),  # Adjust this value as needed
+        axis.title.x=element_blank())
 actPlot2 <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1") & 
               strength %in% c("none", "weak") & is_aggregate=="Aggregation"), 
        aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
@@ -429,7 +505,8 @@ actPlot2 <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1") &
        scale_size_manual(values=c(2,5))+
        geom_line(alpha=0.5)+
        xlab("Effect strength")+
-       guides(color=guide_legend(title="Setting"))+
+        ylab("Rank") +
+       guides(color=guide_legend(title=""))+
        theme_minimal()+
        theme(axis.title.x=element_blank())
 
@@ -452,9 +529,11 @@ actMethodPlot <- ggplot(subset(ranksLinesAct, effect_strength %in% c("0.5", "1")
        scale_size_manual(values=c(2,5))+
        geom_line(alpha=0.5)+
        xlab("Effect strength")+
-       guides(color=guide_legend(title="Setting"))+
+       ylab("Rank") +
+       guides(color=guide_legend(title=""))+
        theme_minimal()+
-       theme(axis.title.x=element_blank())
+        theme(legend.spacing.x = unit(0.5, "cm"),  # Adjust this value as needed
+        axis.title.x=element_blank())
 haploMethodPlot <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "3") & 
               strength %in% c("none", "weak") & is_aggregate=="Method"), 
        aes(x=effect_strength_f, y=rank, color=gc, group=interaction(gc)))+
@@ -467,12 +546,13 @@ haploMethodPlot <- ggplot(subset(ranksLinesHapplo, effect_strength %in% c("1", "
        scale_size_manual(values=c(2,5))+
        geom_line(alpha=0.5)+
        xlab("Effect strength")+
+       ylab("Rank") +
        guides(color="none")+
        theme_minimal()
 
 gcBiasMethodsPlot <- ggarrange(actMethodPlot, haploMethodPlot, nrow=2, common.legend=TRUE)
 gcBiasMethodsPlot
-ggsave("gcBiasMethodsPlot.png", gcBiasMethodsPlot, width=20, height=20, unit="cm")
+ggsave("gcBiasMethodsPlot.png", gcBiasMethodsPlot, width=25, height=20, unit="cm")
 ```
 
 ## Positive control: 
@@ -486,7 +566,7 @@ allMotifRanks <- lapply(allSimDirs, function(path){
   
   if(file.exists(path))
   {
-    name <- unlist(tstrsplit(path, split="/", keep=3))
+    name <- unlist(tstrsplit(path, split="/", keep=11))
     res <- readRDS(path)
     ranks <- lapply(res$true_rank_table, as.data.table, keep.rownames=TRUE)
     methodNames <- names(ranks)
@@ -568,6 +648,9 @@ ylab("Effect strength")+
 theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
 theme(axis.title.x=element_blank())
 
+actControlPlot <- actControlPlot +
+  labs(fill = "Rank")
+
 happControlPlot <- ggplot(subset(motifRanksDt, paradigm=="Haploinsufficiency"),
                          aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
 facet_grid(cols=vars(paradigm, peak_set), scales="free")+
@@ -586,9 +669,12 @@ ylab("Effect strength")+
 theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
 theme(axis.title.x=element_blank())
 
+happControlPlot <- happControlPlot +
+  labs(fill = "Rank")
+
 posControlAllPlot <- ggarrange(actControlPlot, happControlPlot, nrow=2, common.legend=TRUE)
 posControlAllPlot
-ggsave("posControlPlot.png", posControlAllPlot, width=35, height=12, unit="cm")
+ggsave("posControlPlot.png", posControlAllPlot, width=18, height=20, unit="cm")
 
 # Plot only the core methods
 actControlMethodPlot <- ggplot(subset(motifRanksDt, paradigm=="Activation" & 
@@ -611,6 +697,9 @@ ylab("Effect strength")+
 theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
 theme(axis.title.x=element_blank())
 
+actControlMethodPlot <- actControlMethodPlot +
+  labs(fill = "Rank")
+
 happControlMethodPlot <- ggplot(subset(motifRanksDt, paradigm=="Haploinsufficiency" &
                                          is_aggregate=="Method"),
                          aes(y=effect_strength_f, x=method, fill=rank, label=rank))+
@@ -630,10 +719,13 @@ ylab("Effect strength")+
 theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))+
 theme(axis.title.x=element_blank())
 
+happControlMethodPlot <- happControlMethodPlot +
+  labs(fill = "Rank")
+
 posControlMethodPlot <- ggarrange(actControlMethodPlot, happControlMethodPlot, 
-                                  ncol=2, common.legend=TRUE)
+                                  nrow=2, common.legend=TRUE)
 posControlMethodPlot
-ggsave("posControlMethodPlot.png", posControlMethodPlot, width=35, height=12, unit="cm")
+ggsave("posControlMethodPlot.png", posControlMethodPlot, width=18, height=20, unit="cm")
 ```
 
 ## Peak stats
@@ -798,7 +890,7 @@ fracs <- lapply(1:length(namesPeaks), function(i){
   print(length(subPeaksChIP)/length(chIPPeak))
   print(length(subPeaksChIP))
   
-   fwrite(as.data.table(subPeaksChIP)[,c("seqnames", "start", "end", paste0("V", 4:10))], file.path("./tf_peaks", paste(tfName, "peaks_with_motif.bed", sep="_")))
+   fwrite(as.data.table(subPeaksChIP)[,c("seqnames", "start", "end", paste0("V", 4:10))], file.path("/mnt/plger/esonder/R/tf_activity_benchmark/simulations/simulations/production_simulation/tf_peaks", paste(tfName, "peaks_with_motif.bed", sep="_")))
    
    fracs <- length(subPeaksChIP)/length(chIPPeak)
    
@@ -876,19 +968,19 @@ enrDt$n_motif_matches <- nMotifMatches
 enrDt[,enr_motif_chip_ov_atac:=n_motif_with_chip_ov_atac/n_motif_outside_atac]
 enrDt[,enr_motif_chip_peaks_ov_atac:=n_chip_peaks_ov_atac_motif/n_motif_outside_atac]
 
-a <- ggplot(enrDt, aes(fill=enr_motif_chip_ov_atac, x=tf, y="Fraction"))+
+a <- ggplot(enrDt, aes(fill=enr_motif_chip_ov_atac, x=tf, y="Ratio"))+
   geom_tile()+
   scale_fill_viridis_c()+
   theme_minimal()+
   ylab("")+
-  guides(fill=guide_legend(title="[N motifs within a ChIP-peak] / [N motifs outside]",
+  guides(fill=guide_legend(title="Count(motifs within a ChIP-peak) / Count(motifs outside)",
                            title.position="top"))+
   theme(axis.title.y=element_blank(),
         axis.title.x=element_blank(),
         legend.position = "top")
 a
 
-b <- ggplot(enrDt, aes(fill=enr_motif_chip_peaks_ov_atac, x=tf, y="Fraction"))+
+b <- ggplot(enrDt, aes(fill=enr_motif_chip_peaks_ov_atac, x=tf, y="Ratio"))+
   geom_tile()+
   scale_fill_viridis_c()+
   theme_minimal()+
@@ -901,6 +993,7 @@ b <- ggplot(enrDt, aes(fill=enr_motif_chip_peaks_ov_atac, x=tf, y="Fraction"))+
 
 fracPlot <- ggarrange(a,b, nrow=2)
 ggsave("fracPlot.png", fracPlot, width=12, heigh=10, units="cm")
+ggsave("Ratio.png", a, width=12, height = 5, units="cm")
 ```
 
 # Motif quality Plots
